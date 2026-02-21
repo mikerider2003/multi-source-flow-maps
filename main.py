@@ -12,16 +12,47 @@ def matplotlib_map(gdf, data):
     # Plot the geometries
     gdf.plot(ax=ax, color='lightblue', edgecolor='black', linewidth=0.5)
 
+    # FIXME: FR has bad centroids because of south America territory we should calc it differently
+    # Create a dictionary mapping country name to (longitude, latitude)
+    centroids = {}
+    for _, row in gdf.iterrows():
+        name = row.get('name')          
+        if name and pd.notna(row['geometry']) and not row['geometry'].is_empty:
+            centroid = row['geometry'].centroid
+            centroids[name] = (centroid.x, centroid.y)   
+
+    # Scale line width based on quantity
+    max_q = data['quantity'].max()
+
+    # Draw each flow as a curved arrow
+    for _, row in data.iterrows():
+        src, dst, qty = row['source'], row['destination'], row['quantity']
+        if src in centroids and dst in centroids:
+            src_lon, src_lat = centroids[src]
+            dst_lon, dst_lat = centroids[dst]
+            lw = 0.5 + (qty / max_q) * 4   
+
+            # Curved arrow annotation
+            ax.annotate(
+                "", 
+                xy=(dst_lon, dst_lat), 
+                xytext=(src_lon, src_lat),
+                arrowprops=dict(
+                    arrowstyle="->",
+                    lw=lw,
+                    color='red',
+                    connectionstyle="arc3,rad=0.2"  
+                )
+            )
 
     # Zoom in on Europe
     ax.set_xlim([-15, 45])
     ax.set_ylim([30, 75])
     
-    # Remove axis ticks 
+    # Remove axis ticks
     ax.set_xticks([])
     ax.set_yticks([])
     
-    # Show the plot
     plt.tight_layout()
     plt.show()
 
