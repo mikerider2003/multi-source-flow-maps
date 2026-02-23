@@ -5,21 +5,37 @@ import folium
 import plotly.graph_objects as go
 import pandas as pd
 
-def matplotlib_map(gdf, data):
+def get_centroid(centroid_table, country_name):
+    # Get the centroid (longitude, latitude) of a country from a table with (name, centroid) pairs
+    # Note: column names are based on current version of centroids.csv; if this file gets replaced, also change the column names here
+    row = centroid_table.loc[centroid_table['name'] == country_name]
+    try:
+        return (row['lon'].iloc[0], row['lat'].iloc[0])
+    except:
+        print(f"Couldn't find centroid of {country_name}!")
+        return (0, 0) # Substitute (0,0) if a country cannot be found
+
+
+
+def matplotlib_map(gdf, data, centroid_table):
     # Create a figure and axis
     fig, ax = plt.subplots(1, 1, figsize=(6, 6))
     
     # Plot the geometries
     gdf.plot(ax=ax, color='lightblue', edgecolor='black', linewidth=0.5)
 
-    # FIXME: FR has bad centroids because of south America territory we should calc it differently
-    # Create a dictionary mapping country name to (longitude, latitude)
+    # Get country centroids
     centroids = {}
     for _, row in gdf.iterrows():
         name = row.get('name')          
-        if name and pd.notna(row['geometry']) and not row['geometry'].is_empty:
-            centroid = row['geometry'].centroid
-            centroids[name] = (centroid.x, centroid.y)   
+        
+        # NEW: Get centroid from table (which is pre-computed in a nicer way)
+        centroids[name] = get_centroid(centroid_table, name)
+
+        # OLD: Compute centroid based on geodata
+        #if name and pd.notna(row['geometry']) and not row['geometry'].is_empty:
+            #centroid = row['geometry'].centroid
+            #centroids[name] = (centroid.x, centroid.y)   
 
     # Scale line width based on quantity
     max_q = data['quantity'].max()
@@ -129,12 +145,18 @@ def main():
     # Load the GeoJSON file
     gdf = gpd.read_file("geo.json")
 
+    # Load country centroid table
+    # Current version is taken from https://github.com/360-info/country-centroids?tab=readme-ov-file
+    # A few country names have been edited to match the names in geo.json (e.g. Vatican City -> Vatican)
+    # Also, a few non-country territories (like Gibraltar or Guernsey) from geo.json are missing in centroids.csv, but I doubt this'll be a problem
+    centroid_table = pd.read_csv("centroids.csv")
+
     # Load the flow_map data
     data = pd.read_csv("data.csv")
 
-    matplotlib_map(gdf, data)
-    # eu_map_folium(gdf, data)
-    # eu_map_plotly(gdf, data)
+    matplotlib_map(gdf, data, centroid_table)
+    #eu_map_folium(gdf, data)
+    #eu_map_plotly(gdf, data)
     
 
 
