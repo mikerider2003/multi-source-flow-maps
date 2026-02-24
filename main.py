@@ -37,29 +37,30 @@ def matplotlib_map(gdf, data, centroid_table):
             #centroid = row['geometry'].centroid
             #centroids[name] = (centroid.x, centroid.y)   
 
-    # Scale line width based on quantity
-    max_q = data['quantity'].max()
+    # Get highest quantity in whole dataset (for scaling line width)
+    max_q = data.max(numeric_only=True).max()
 
     # Draw each flow as a curved arrow
-    for _, row in data.iterrows():
-        src, dst, qty = row['source'], row['destination'], row['quantity']
-        if src in centroids and dst in centroids:
-            src_lon, src_lat = centroids[src]
-            dst_lon, dst_lat = centroids[dst]
-            lw = 0.5 + (qty / max_q) * 4   
+    for src, row in data.iterrows():
+        for dst, qty in row.items():
+            # Ignore flow to self and flow to locations not found in the centroids list
+            if qty != 0 and src in centroids and dst in centroids:
+                src_lon, src_lat = centroids[src]
+                dst_lon, dst_lat = centroids[dst]
+                lw = 0.5 + (qty / max_q) * 4   
 
-            # Curved arrow annotation
-            ax.annotate(
-                "", 
-                xy=(dst_lon, dst_lat), 
-                xytext=(src_lon, src_lat),
-                arrowprops=dict(
-                    arrowstyle="->",
-                    lw=lw,
-                    color='red',
-                    connectionstyle="arc3,rad=0.2"  
+                # Curved arrow annotation
+                ax.annotate(
+                    "", 
+                    xy=(dst_lon, dst_lat), 
+                    xytext=(src_lon, src_lat),
+                    arrowprops=dict(
+                        arrowstyle="->",
+                        lw=lw,
+                        color='red',
+                        connectionstyle="arc3,rad=0.2"  
+                    )
                 )
-            )
 
     # Zoom in on Europe
     ax.set_xlim([-15, 45])
@@ -71,6 +72,8 @@ def matplotlib_map(gdf, data, centroid_table):
     
     plt.tight_layout()
     plt.show()
+
+
 
 def eu_map_folium(gdf, data):
     """Interactive Folium version"""
@@ -113,6 +116,8 @@ def eu_map_folium(gdf, data):
     
     return m
 
+
+
 def eu_map_plotly(gdf, data):
     """Interactive Plotly version"""
     
@@ -140,6 +145,7 @@ def eu_map_plotly(gdf, data):
     return fig
 
 
+
 def main():
 
     # Load the GeoJSON file
@@ -151,8 +157,13 @@ def main():
     # Also, a few non-country territories (like Gibraltar or Guernsey) from geo.json are missing in centroids.csv, but I doubt this'll be a problem
     centroid_table = pd.read_csv("centroids.csv")
 
-    # Load the flow_map data
-    data = pd.read_csv("data.csv")
+    # Load the flow map data
+    # This is a copy of sheet 2 of EU_trade_data.xlsx (so export in euros), with the total intra-eu line removed
+    data = pd.read_csv("EU_trade_data.csv", sep=';', thousands='.', header=0, index_col=0)
+    print("IMPORTED DATASET: ")
+    print(data.head())
+    #print(data['Belgium']['Czechia']) # For some reason the first key refers to the column and the second to the row?
+                                      # So data[A][B] is the value in euros that B exported to A (or equivalently, that A imported from B)
 
     matplotlib_map(gdf, data, centroid_table)
     #eu_map_folium(gdf, data)
