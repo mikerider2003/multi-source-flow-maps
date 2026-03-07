@@ -146,7 +146,7 @@ def eu_map_plotly(gdf, data):
 
 
 
-def main():
+def main(dataset):
 
     # Load the GeoJSON file
     gdf = gpd.read_file("geo.json")
@@ -159,7 +159,7 @@ def main():
 
     # Load the flow map data
     # This is a copy of sheet 2 of EU_trade_data.xlsx (so export in euros), with the total intra-eu line removed
-    data = pd.read_csv("EU_trade_data.csv", sep=';', thousands='.', header=0, index_col=0)
+    data = pd.read_csv(f"EU_trade_data_{dataset}.csv", sep=';', thousands='.', header=0, index_col=0)
     print("IMPORTED DATASET: ")
     print(data.head())
     #print(data['Belgium']['Czechia']) # For some reason the first key refers to the column and the second to the row?
@@ -172,4 +172,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    dataset = "3_clusters" # Options: "full", "distant", "close", "2_clusters", "3_clusters" or "5_clusters". For descriptions, see the README.
+    main(dataset)
