@@ -4,6 +4,8 @@ import folium
 
 import plotly.graph_objects as go
 import pandas as pd
+import numpy as np
+from scipy.cluster.vq import kmeans2
 
 def get_centroid(centroid_table, country_name):
     # Get the centroid (longitude, latitude) of a country from a table with (name, centroid) pairs
@@ -146,6 +148,47 @@ def eu_map_plotly(gdf, data):
 
 
 
+def cluster_countries(centroid_table, countries, n_clusters):
+    """Cluster countries by their geographic coordinates using KMeans.
+    Returns a dict mapping cluster_id -> list of country names."""
+    # Build a dataframe of only the countries present in the dataset
+    geo = centroid_table[centroid_table['name'].isin(countries)].copy()
+    coords = geo[['lat', 'lon']].values
+    names = geo['name'].values
+
+    rng = np.random.default_rng(42)
+    init_idx = rng.choice(len(coords), size=n_clusters, replace=False)
+    _, labels = kmeans2(coords.astype(float), coords[init_idx], iter=100, minit='matrix')
+
+    clusters = {}
+    for name, label in zip(names, labels):
+        clusters.setdefault(int(label), []).append(name)
+    return clusters
+
+
+def select_source_cluster(clusters):
+    """Print the clusters and let the user pick one as the source."""
+    print("\n=== Country Clusters ===")
+    for cid in sorted(clusters):
+        members = ", ".join(sorted(clusters[cid]))
+        print(f"  Cluster {cid}: {members}")
+
+    while True:
+        try:
+            choice = int(input(f"\nSelect a source cluster (0-{len(clusters)-1}): "))
+            if choice in clusters:
+                return clusters[choice]
+        except ValueError:
+            pass
+        print("Invalid choice, try again.")
+
+
+def filter_data_by_sources(data, source_countries):
+    """Keep only rows (sources) that belong to the selected cluster."""
+    valid_sources = [c for c in source_countries if c in data.index]
+    return data.loc[valid_sources]
+
+
 def main(dataset):
 
     # Load the GeoJSON file
@@ -168,9 +211,49 @@ def main(dataset):
     matplotlib_map(gdf, data, centroid_table)
     #eu_map_folium(gdf, data)
     #eu_map_plotly(gdf, data)
-    
+
+
+def main_clustered():
+    """Interactive mode: cluster countries geographically and let the user pick a source cluster."""
+
+    # Load the GeoJSON file
+    gdf = gpd.read_file("geo.json")
+
+    # Load country centroid table
+    centroid_table = pd.read_csv("centroids.csv")
+
+    # Always use the full dataset for clustering
+    data = pd.read_csv("EU_trade_data_full.csv", sep=';', thousands='.', header=0, index_col=0)
+
+    countries = list(data.index)
+
+    # Ask the user how many clusters
+    while True:
+        try:
+            n = int(input(f"How many clusters? (2-{len(countries)}): "))
+            if 2 <= n <= len(countries):
+                break
+        except ValueError:
+            pass
+        print("Please enter a valid number.")
+
+    clusters = cluster_countries(centroid_table, countries, n)
+    source_countries = select_source_cluster(clusters)
+
+    print(f"\nSource countries: {', '.join(sorted(source_countries))}")
+
+    # Filter data to only flows originating from the selected cluster
+    filtered = filter_data_by_sources(data, source_countries)
+    print(f"Showing exports from {len(filtered)} source countries to {len(filtered.columns)} destinations.\n")
+
+    matplotlib_map(gdf, filtered, centroid_table)
 
 
 if __name__ == "__main__":
-    dataset = "3_clusters" # Options: "full", "distant", "close", "2_clusters", "3_clusters" or "5_clusters". For descriptions, see the README.
-    main(dataset)
+    # Set mode to "clustered" for interactive clustering, or a dataset name for a pre-made subset
+    mode = "clustered"  # Options: "clustered", "full", "distant", "close", "2_clusters", "3_clusters", "5_clusters"
+
+    if mode == "clustered":
+        main_clustered()
+    else:
+        main(mode)
