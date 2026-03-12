@@ -234,14 +234,14 @@ def _smooth_curve(p0, p1, n=40):
     return cs_x(t_smooth), cs_y(t_smooth)
 
 
-def matplotlib_map_bundled(gdf, data, centroid_table, clusters):
+def matplotlib_map_bundled(gdf, data, centroid_table, clusters, show_intra=True):
     """Draw a flow map with edge bundling between clusters.
 
     Rendering per (src_cluster, dst_cluster):
       1. Thin edges: each source country  →  bundle point
       2. One thick edge: bundle point  →  split point   (merged trunk)
       3. Thin edges: split point  →  each destination country
-    Intra-cluster flows are drawn as direct curved arrows.
+    Intra-cluster flows are drawn as direct curved arrows if show_intra=True.
     """
     fig, ax = plt.subplots(1, 1, figsize=(10, 8))
     gdf.plot(ax=ax, color='lightblue', edgecolor='black', linewidth=0.5)
@@ -295,26 +295,27 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters):
             ax.plot(xs, ys, color=color, lw=lw, alpha=0.45, solid_capstyle='round')
 
     # ── Draw intra-cluster flows as direct arcs ──
-    for src, row_data in data.iterrows():
-        src_cid = country_to_cluster.get(src)
-        if src_cid is None or src not in centroids:
-            continue
-        for dst, qty in row_data.items():
-            if qty == 0 or dst not in centroids or src == dst:
+    if show_intra:
+        for src, row_data in data.iterrows():
+            src_cid = country_to_cluster.get(src)
+            if src_cid is None or src not in centroids:
                 continue
-            dst_cid = country_to_cluster.get(dst)
-            if dst_cid is None or src_cid != dst_cid:
-                continue
-            lw = 0.3 + (qty / max_q) * 3
-            color = cluster_colors.get(src_cid, 'red')
-            ax.annotate(
-                "", xy=centroids[dst], xytext=centroids[src],
-                arrowprops=dict(
-                    arrowstyle="->", lw=lw,
-                    color=color, alpha=0.45,
-                    connectionstyle="arc3,rad=0.2"
+            for dst, qty in row_data.items():
+                if qty == 0 or dst not in centroids or src == dst:
+                    continue
+                dst_cid = country_to_cluster.get(dst)
+                if dst_cid is None or src_cid != dst_cid:
+                    continue
+                lw = 0.3 + (qty / max_q) * 3
+                color = cluster_colors.get(src_cid, 'red')
+                ax.annotate(
+                    "", xy=centroids[dst], xytext=centroids[src],
+                    arrowprops=dict(
+                        arrowstyle="->", lw=lw,
+                        color=color, alpha=0.45,
+                        connectionstyle="arc3,rad=0.2"
+                    )
                 )
-            )
 
     # Debug markers: bundle (●) and split (■) points
     for (src_cid, dst_cid), info in bs.items():
@@ -429,7 +430,9 @@ def main_clustered():
     filtered = filter_data_by_sources(data, source_countries)
     print(f"Showing exports from {len(filtered)} source countries to {len(filtered.columns)} destinations.\n")
 
-    matplotlib_map_bundled(gdf, filtered, centroid_table, clusters)
+    show_intra = input("Show intra-cluster edges (within the source cluster)? [y/n]: ").strip().lower() != 'n'
+
+    matplotlib_map_bundled(gdf, filtered, centroid_table, clusters, show_intra=show_intra)
 
 
 if __name__ == "__main__":
