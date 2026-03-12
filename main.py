@@ -219,12 +219,14 @@ def compute_bundle_split_points(data, centroids, clusters, cost_fn=None):
     return result
 
 
-def _smooth_curve(p0, p1, n=40):
-    """Return a gentle cubic-spline arc between two points with a slight curve."""
+def _smooth_curve(p0, p1, offset=0.08, n=40):
+    """Return a gentle cubic-spline arc between two points.
+
+    Positive offset curves the arc one way, negative curves the other.
+    This sign is exploited by _compute_trunk_offsets to separate crossing trunks.
+    """
     mid = ((p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2)
     dx, dy = p1[0] - p0[0], p1[1] - p0[1]
-    # Offset the midpoint perpendicular to the line for a slight arc
-    offset = 0.08
     ctrl = (mid[0] - dy * offset, mid[1] + dx * offset)
     pts = np.array([p0, ctrl, p1])
     t = np.array([0, 0.5, 1.0])
@@ -232,6 +234,63 @@ def _smooth_curve(p0, p1, n=40):
     cs_x = CubicSpline(t, pts[:, 0], bc_type='clamped')
     cs_y = CubicSpline(t, pts[:, 1], bc_type='clamped')
     return cs_x(t_smooth), cs_y(t_smooth)
+
+
+def _segments_cross(a, b, c, d):
+    """Return True if segment a→b properly (not at endpoints) intersects c→d."""
+    def _cross2d(o, p, q):
+        return (p[0] - o[0]) * (q[1] - o[1]) - (p[1] - o[1]) * (q[0] - o[0])
+    d1 = _cross2d(c, d, a)
+    d2 = _cross2d(c, d, b)
+    d3 = _cross2d(a, b, c)
+    d4 = _cross2d(a, b, d)
+    return ((d1 > 0) != (d2 > 0)) and ((d3 > 0) != (d4 > 0))
+
+
+def _compute_trunk_offsets(bs_points, base_offset=0.15):
+    """Assign an arc-offset sign to every trunk so that crossing pairs arc
+    in opposite directions, visually separating them.
+
+    This is the crossing-minimization cost function: for each pair of trunk
+    segments whose straight-line extents intersect, one gets +base_offset and
+    the other gets -base_offset.  Swap or extend this logic to implement a
+    different crossing-cost criterion (e.g. a continuous penalty minimized via
+    scipy.optimize).
+    """
+    keys = list(bs_points.keys())
+    offsets = {k: base_offset for k in keys}
+    for i in range(len(keys)):
+        for j in range(i + 1, len(keys)):
+            ki, kj = keys[i], keys[j]
+            if _segments_cross(
+                bs_points[ki]['bundle'], bs_points[ki]['split'],
+                bs_points[kj]['bundle'], bs_points[kj]['split'],
+            ):
+                # Arc the two crossing trunks in opposite directions
+                offsets[kj] = -offsets[ki]
+    return offsets
+
+
+def _draw_curve_with_arrow(ax, xs, ys, color, lw, alpha):
+    """Draw a precomputed curve with a filled arrowhead at its tip."""
+    split = max(2, len(xs) - 5)
+    # Curve body
+    ax.plot(xs[:split], ys[:split], color=color, lw=lw, alpha=alpha,
+            solid_capstyle='round', zorder=3)
+    # Final short segment + arrowhead
+    ax.annotate(
+        "",
+        xy=(xs[-1], ys[-1]),
+        xytext=(xs[split - 1], ys[split - 1]),
+        arrowprops=dict(
+            arrowstyle="-|>",
+            color=color,
+            lw=lw,
+            alpha=alpha,
+            mutation_scale=6 + lw * 2,
+        ),
+        zorder=4,
+    )
 
 
 def matplotlib_map_bundled(gdf, data, centroid_table, clusters, show_intra=True):
@@ -267,32 +326,36 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, show_intra=True)
 
     max_q = data.max(numeric_only=True).max()
 
+    # Compute arc-offset signs for trunks to minimise visual crossings
+    trunk_offsets = _compute_trunk_offsets(bs)
+
     # ── Draw inter-cluster bundled flows ──
     for (src_cid, dst_cid), info in bs.items():
         bundle_pt = info['bundle']
         split_pt  = info['split']
         color = cluster_colors.get(src_cid, 'red')
+        trunk_offset = trunk_offsets[(src_cid, dst_cid)]
 
-        # 1) Thin legs: each source → bundle point
+        # 1) Thin legs: each source → bundle point  (arrow at bundle end)
         for country, w in info['src_weights'].items():
             if country not in centroids:
                 continue
             lw = 0.3 + (w / max_q) * 3
             xs, ys = _smooth_curve(centroids[country], bundle_pt)
-            ax.plot(xs, ys, color=color, lw=lw, alpha=0.45, solid_capstyle='round')
+            _draw_curve_with_arrow(ax, xs, ys, color, lw, alpha=0.55)
 
-        # 2) Thick trunk: bundle point → split point
+        # 2) Thick trunk: bundle point → split point  (crossing-minimising arc)
         trunk_lw = 0.5 + (info['total_flow'] / max_q) * 5
-        xs, ys = _smooth_curve(bundle_pt, split_pt)
-        ax.plot(xs, ys, color=color, lw=trunk_lw, alpha=0.7, solid_capstyle='round')
+        xs, ys = _smooth_curve(bundle_pt, split_pt, offset=trunk_offset)
+        _draw_curve_with_arrow(ax, xs, ys, color, trunk_lw, alpha=0.75)
 
-        # 3) Thin legs: split point → each destination
+        # 3) Thin legs: split point → each destination  (arrow at destination)
         for country, w in info['dst_weights'].items():
             if country not in centroids:
                 continue
             lw = 0.3 + (w / max_q) * 3
             xs, ys = _smooth_curve(split_pt, centroids[country])
-            ax.plot(xs, ys, color=color, lw=lw, alpha=0.45, solid_capstyle='round')
+            _draw_curve_with_arrow(ax, xs, ys, color, lw, alpha=0.55)
 
     # ── Draw intra-cluster flows as direct arcs ──
     if show_intra:
@@ -311,9 +374,10 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, show_intra=True)
                 ax.annotate(
                     "", xy=centroids[dst], xytext=centroids[src],
                     arrowprops=dict(
-                        arrowstyle="->", lw=lw,
-                        color=color, alpha=0.45,
-                        connectionstyle="arc3,rad=0.2"
+                        arrowstyle="-|>", lw=lw,
+                        color=color, alpha=0.55,
+                        connectionstyle="arc3,rad=0.2",
+                        mutation_scale=6 + lw * 2,
                     )
                 )
 
