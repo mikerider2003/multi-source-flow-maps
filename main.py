@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 import pandas as pd
 import numpy as np
 from scipy.cluster.vq import kmeans2
+from scipy.interpolate import CubicSpline
 
 def get_centroid(centroid_table, country_name):
     # Get the centroid (longitude, latitude) of a country from a table with (name, centroid) pairs
@@ -148,6 +149,188 @@ def eu_map_plotly(gdf, data):
 
 
 
+# ── Edge-bundling helpers ─────────────────────────────────────────────────
+
+def compute_cost_weighted_mean(positions, weights):
+    """Default cost function: weighted mean of positions.
+
+    Minimises  sum_i  w_i * ||p - x_i||^2.
+    You can swap this out for any function with the same signature:
+        (positions: dict[str, (x,y)], weights: dict[str, float]) -> (x, y)
+    """
+    total_w = sum(weights.values())
+    if total_w == 0:
+        xs = [positions[c][0] for c in weights]
+        ys = [positions[c][1] for c in weights]
+        return (float(np.mean(xs)), float(np.mean(ys)))
+    x = sum(weights[c] * positions[c][0] for c in weights) / total_w
+    y = sum(weights[c] * positions[c][1] for c in weights) / total_w
+    return (x, y)
+
+
+def compute_bundle_split_points(data, centroids, clusters, cost_fn=None):
+    """Compute bundle and split points for every (src_cluster, dst_cluster) pair.
+
+    Returns
+    -------
+    dict : (src_cid, dst_cid) -> {
+        'bundle': (x, y),
+        'split': (x, y),
+        'src_weights': {country: flow_total},
+        'dst_weights': {country: flow_total},
+        'total_flow': float
+    }
+    """
+    if cost_fn is None:
+        cost_fn = compute_cost_weighted_mean
+
+    result = {}
+    for src_cid in clusters:
+        for dst_cid in clusters:
+            if src_cid == dst_cid:
+                continue
+
+            src_weights = {}
+            for s in clusters[src_cid]:
+                if s not in data.index or s not in centroids:
+                    continue
+                w = sum(data.loc[s, d] for d in clusters[dst_cid] if d in data.columns)
+                if w > 0:
+                    src_weights[s] = w
+
+            dst_weights = {}
+            for d in clusters[dst_cid]:
+                if d not in data.columns or d not in centroids:
+                    continue
+                w = sum(data.loc[s, d] for s in clusters[src_cid] if s in data.index)
+                if w > 0:
+                    dst_weights[d] = w
+
+            if not src_weights or not dst_weights:
+                continue
+
+            result[(src_cid, dst_cid)] = {
+                'bundle': cost_fn(centroids, src_weights),
+                'split':  cost_fn(centroids, dst_weights),
+                'src_weights': src_weights,
+                'dst_weights': dst_weights,
+                'total_flow': sum(src_weights.values()),
+            }
+    return result
+
+
+def _smooth_curve(p0, p1, n=40):
+    """Return a gentle cubic-spline arc between two points with a slight curve."""
+    mid = ((p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2)
+    dx, dy = p1[0] - p0[0], p1[1] - p0[1]
+    # Offset the midpoint perpendicular to the line for a slight arc
+    offset = 0.08
+    ctrl = (mid[0] - dy * offset, mid[1] + dx * offset)
+    pts = np.array([p0, ctrl, p1])
+    t = np.array([0, 0.5, 1.0])
+    t_smooth = np.linspace(0, 1, n)
+    cs_x = CubicSpline(t, pts[:, 0], bc_type='clamped')
+    cs_y = CubicSpline(t, pts[:, 1], bc_type='clamped')
+    return cs_x(t_smooth), cs_y(t_smooth)
+
+
+def matplotlib_map_bundled(gdf, data, centroid_table, clusters):
+    """Draw a flow map with edge bundling between clusters.
+
+    Rendering per (src_cluster, dst_cluster):
+      1. Thin edges: each source country  →  bundle point
+      2. One thick edge: bundle point  →  split point   (merged trunk)
+      3. Thin edges: split point  →  each destination country
+    Intra-cluster flows are drawn as direct curved arrows.
+    """
+    fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+    gdf.plot(ax=ax, color='lightblue', edgecolor='black', linewidth=0.5)
+
+    # Build centroid lookup
+    centroids = {}
+    for _, row in gdf.iterrows():
+        name = row.get('name')
+        centroids[name] = get_centroid(centroid_table, name)
+
+    # Country -> cluster mapping
+    country_to_cluster = {}
+    for cid, members in clusters.items():
+        for c in members:
+            country_to_cluster[c] = cid
+
+    bs = compute_bundle_split_points(data, centroids, clusters)
+
+    # Colour palette
+    n_clusters = len(clusters)
+    cmap = plt.cm.get_cmap('Set1', max(n_clusters, 3))
+    cluster_colors = {cid: cmap(i) for i, cid in enumerate(sorted(clusters))}
+
+    max_q = data.max(numeric_only=True).max()
+
+    # ── Draw inter-cluster bundled flows ──
+    for (src_cid, dst_cid), info in bs.items():
+        bundle_pt = info['bundle']
+        split_pt  = info['split']
+        color = cluster_colors.get(src_cid, 'red')
+
+        # 1) Thin legs: each source → bundle point
+        for country, w in info['src_weights'].items():
+            if country not in centroids:
+                continue
+            lw = 0.3 + (w / max_q) * 3
+            xs, ys = _smooth_curve(centroids[country], bundle_pt)
+            ax.plot(xs, ys, color=color, lw=lw, alpha=0.45, solid_capstyle='round')
+
+        # 2) Thick trunk: bundle point → split point
+        trunk_lw = 0.5 + (info['total_flow'] / max_q) * 5
+        xs, ys = _smooth_curve(bundle_pt, split_pt)
+        ax.plot(xs, ys, color=color, lw=trunk_lw, alpha=0.7, solid_capstyle='round')
+
+        # 3) Thin legs: split point → each destination
+        for country, w in info['dst_weights'].items():
+            if country not in centroids:
+                continue
+            lw = 0.3 + (w / max_q) * 3
+            xs, ys = _smooth_curve(split_pt, centroids[country])
+            ax.plot(xs, ys, color=color, lw=lw, alpha=0.45, solid_capstyle='round')
+
+    # ── Draw intra-cluster flows as direct arcs ──
+    for src, row_data in data.iterrows():
+        src_cid = country_to_cluster.get(src)
+        if src_cid is None or src not in centroids:
+            continue
+        for dst, qty in row_data.items():
+            if qty == 0 or dst not in centroids or src == dst:
+                continue
+            dst_cid = country_to_cluster.get(dst)
+            if dst_cid is None or src_cid != dst_cid:
+                continue
+            lw = 0.3 + (qty / max_q) * 3
+            color = cluster_colors.get(src_cid, 'red')
+            ax.annotate(
+                "", xy=centroids[dst], xytext=centroids[src],
+                arrowprops=dict(
+                    arrowstyle="->", lw=lw,
+                    color=color, alpha=0.45,
+                    connectionstyle="arc3,rad=0.2"
+                )
+            )
+
+    # Debug markers: bundle (●) and split (■) points
+    for (src_cid, dst_cid), info in bs.items():
+        ax.plot(*info['bundle'], 'o', color='black', markersize=5, zorder=5)
+        ax.plot(*info['split'],  's', color='black', markersize=5, zorder=5)
+
+    ax.set_xlim([-15, 45])
+    ax.set_ylim([30, 75])
+    ax.set_xticks([])
+    ax.set_yticks([])
+    plt.tight_layout()
+    plt.show()
+
+
+# ── Clustering helpers ────────────────────────────────────────────────────
+
 def cluster_countries(centroid_table, countries, n_clusters):
     """Cluster countries by their geographic coordinates using KMeans.
     Returns a dict mapping cluster_id -> list of country names."""
@@ -246,7 +429,7 @@ def main_clustered():
     filtered = filter_data_by_sources(data, source_countries)
     print(f"Showing exports from {len(filtered)} source countries to {len(filtered.columns)} destinations.\n")
 
-    matplotlib_map(gdf, filtered, centroid_table)
+    matplotlib_map_bundled(gdf, filtered, centroid_table, clusters)
 
 
 if __name__ == "__main__":
