@@ -168,8 +168,28 @@ def compute_cost_weighted_mean(positions, weights):
     return (x, y)
 
 
+def compute_cluster_bundle_points(centroids, clusters):
+    """Compute a single bundle point per cluster as the mean of all countries.
+
+    Returns
+    -------
+    dict : cluster_id -> (x, y)
+    """
+    bundle_points = {}
+    for cid, countries in clusters.items():
+        valid = [c for c in countries if c in centroids]
+        if valid:
+            xs = [centroids[c][0] for c in valid]
+            ys = [centroids[c][1] for c in valid]
+            bundle_points[cid] = (float(np.mean(xs)), float(np.mean(ys)))
+    return bundle_points
+
+
 def compute_bundle_split_points(data, centroids, clusters, cost_fn=None):
     """Compute bundle and split points for every (src_cluster, dst_cluster) pair.
+
+    Bundle points are precomputed once per source cluster (mean of countries).
+    Split points are computed per destination for each pair.
 
     Returns
     -------
@@ -183,6 +203,9 @@ def compute_bundle_split_points(data, centroids, clusters, cost_fn=None):
     """
     if cost_fn is None:
         cost_fn = compute_cost_weighted_mean
+
+    # Precompute bundle points per source cluster
+    bundle_points = compute_cluster_bundle_points(centroids, clusters)
 
     result = {}
     for src_cid in clusters:
@@ -210,7 +233,7 @@ def compute_bundle_split_points(data, centroids, clusters, cost_fn=None):
                 continue
 
             result[(src_cid, dst_cid)] = {
-                'bundle': cost_fn(centroids, src_weights),
+                'bundle': bundle_points[src_cid],
                 'split':  cost_fn(centroids, dst_weights),
                 'src_weights': src_weights,
                 'dst_weights': dst_weights,
