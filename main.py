@@ -24,18 +24,34 @@ def main_clustered():
 
     countries = list(data.index)
 
+    # TODO: REMOVE TESTING: Hard-code values
+    TESTING = True
+    # Number of clusters
+    n = 7
+    # Fixed cluster selection
+    m = 2
+    # Show intra-cluster edges
+    show_intra = False  
+
     # Ask the user how many clusters
-    while True:
-        try:
-            n = int(input(f"How many clusters? (2-{len(countries)}): "))
-            if 2 <= n <= len(countries):
-                break
-        except ValueError:
-            pass
-        print("Please enter a valid number.")
+    # TODO: REMOVE TESTING
+    if not TESTING:
+        while True:
+            try:
+                n = int(input(f"How many clusters? (2-{len(countries)}): "))
+                if 2 <= n <= len(countries):
+                    break
+            except ValueError:
+                pass
+            print("Please enter a valid number.")
 
     clusters = clustering.cluster_countries(centroid_table, countries, n)
-    source_countries = clustering.select_source_cluster(clusters)
+    
+    # TODO: REMOVE TESTING
+    if not TESTING:
+        source_countries = clustering.select_source_cluster(clusters)
+    else:
+        source_countries = clusters[m]
 
     print(f"\nSource countries: {', '.join(sorted(source_countries))}")
 
@@ -43,7 +59,9 @@ def main_clustered():
     filtered = clustering.filter_data_by_sources(data, source_countries)
     print(f"Showing exports from {len(filtered)} source countries to {len(filtered.columns)} destinations.\n")
 
-    show_intra = input("Show intra-cluster edges (within the source cluster)? [y/n]: ").strip().lower() != 'n'
+    # TODO: REMOVE TESTING
+    if not TESTING:
+        show_intra = input("Show intra-cluster edges (within the source cluster)? [y/n]: ").strip().lower() != 'n'
 
     matplotlib_map_bundled(gdf, filtered, centroid_table, clusters, show_intra=show_intra)
 

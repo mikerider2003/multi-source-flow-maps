@@ -303,4 +303,6 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, show_intra=True)
     ax.set_xticks([])
     ax.set_yticks([])
     plt.tight_layout()
-    plt.show()
+    # plt.show()
+
+    plt.savefig("map.png")
