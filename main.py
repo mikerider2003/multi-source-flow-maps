@@ -381,6 +381,41 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, show_intra=True)
                     )
                 )
 
+    # ── Draw country markers ──
+    # Countries that export (source cluster)
+    source_countries = set(data.index)  
+    # All destination countries
+    dest_countries = set(data.columns)  
+
+    # Source countries: squares, sized by total exports
+    for country in source_countries:
+        if country not in centroids:
+            continue
+        cid = country_to_cluster.get(country)
+        if cid is None:
+            continue
+
+        # Total exports from this country
+        total_export = data.loc[country].sum()
+        marker_size = (total_export / max_q) * 5
+        color = cluster_colors.get(cid, 'gray')
+
+        ax.plot(*centroids[country], marker='s', markersize=marker_size, color=color, markeredgecolor='black', markeredgewidth=1, zorder=6, alpha=0.7)
+
+    # Destination countries: circles, unit size
+    for country in dest_countries:
+        if country not in centroids or country in source_countries:
+            # Skip if not found or already drawn as source
+            continue
+        cid = country_to_cluster.get(country)
+        if cid is None:
+            continue
+
+        color = cluster_colors.get(cid, 'gray')
+        ax.plot(*centroids[country], marker='o', markersize=5,
+                color=color, markeredgecolor='black', markeredgewidth=0.5,
+                zorder=6, alpha=0.7)
+
     # Debug markers: bundle (●) and split (■) points
     for (src_cid, dst_cid), info in bs.items():
         ax.plot(*info['bundle'], 'o', color='black', markersize=5, zorder=5)
