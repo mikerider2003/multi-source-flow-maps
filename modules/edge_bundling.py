@@ -323,7 +323,7 @@ def _find_optimal_bundle_point_src(src_cid, data, centroids, clusters, radius, t
 
     initial_guess = np.mean(src_points, axis=0)
     result = minimize(cost_function, initial_guess, method='Nelder-Mead')
-    return tuple(initial_guess)
+    return tuple(result.x)
 
 def matplotlib_map_bundled(gdf, data, centroid_table, clusters, show_intra=True):
     """Draw a flow map with edge bundling between clusters.
