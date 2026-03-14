@@ -2,7 +2,9 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.patches import Circle
 from scipy.interpolate import CubicSpline
+from scipy.optimize import minimize
 from modules.centroids import get_centroid
 
 
@@ -23,23 +25,38 @@ def compute_cost_weighted_mean(positions, weights):
     y = sum(weights[c] * positions[c][1] for c in weights) / total_w
     return (x, y)
 
-def compute_cluster_bundle_points(centroids, clusters):
-    """Compute a single bundle point per cluster as the mean of all countries.
-
-    Returns
-    -------
-    dict : cluster_id -> (x, y)
+def compute_cluster_bundle_point(data, centroids, clusters, radius=3.0):
+    """
+    Compute a single bundle point per cluster. Uses optimization for source 
+    clusters, or falls back to geographic mean for others.
     """
     bundle_points = {}
+    
+    # Pre-calculate simple means first because the optimizer needs them!
+    # (The optimizer needs 'other' bundle points to measure distance to)
+    temp_points = {}
     for cid, countries in clusters.items():
         valid = [c for c in countries if c in centroids]
         if valid:
             xs = [centroids[c][0] for c in valid]
             ys = [centroids[c][1] for c in valid]
-            bundle_points[cid] = (float(np.mean(xs)), float(np.mean(ys)))
+            temp_points[cid] = (float(np.mean(xs)), float(np.mean(ys)))
+            
+    # Optimize
+    for cid in clusters:
+        is_source = any(c in data.index for c in clusters[cid])
+        if is_source:
+             opt_pt = _find_optimal_bundle_point_src(cid, data, centroids, clusters, radius, temp_points)
+             if opt_pt:
+                 bundle_points[cid] = opt_pt
+             else:
+                 bundle_points[cid] = temp_points.get(cid) 
+        else:
+             bundle_points[cid] = temp_points.get(cid)
+             
     return bundle_points
 
-def compute_bundle_split_points(data, centroids, clusters, cost_fn=None):
+def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_points=None):
     """Compute bundle and split points for every (src_cluster, dst_cluster) pair.
 
     Bundle points are precomputed once per source cluster (mean of countries).
@@ -58,8 +75,9 @@ def compute_bundle_split_points(data, centroids, clusters, cost_fn=None):
     if cost_fn is None:
         cost_fn = compute_cost_weighted_mean
 
-    # Precompute bundle points per source cluster
-    bundle_points = compute_cluster_bundle_points(centroids, clusters)
+    # Precompute bundle points per source cluster if not provided
+    if bundle_points is None:
+        bundle_points = compute_cluster_bundle_point(data, centroids, clusters)
 
     result = {}
     for src_cid in clusters:
@@ -169,6 +187,143 @@ def _draw_curve_with_arrow(ax, xs, ys, color, lw, alpha):
         zorder=4,
     )
 
+def _feasible_areas(source_points, radius=3.0):
+    """
+    Returns a list of feasible regions as circles, each defined by a center
+    and a radius. Currently all circles have the same radius, but this can be
+    extended later (e.g., different radii per source point).
+    """
+    src_arr = np.array(source_points)
+    areas = [{'center': src, 'radius': radius} for src in src_arr]
+    return areas
+
+def _compute_distances_from_source(src_cid, bundle_points):
+    """
+    Calculate the distance between the source cluster's bundle point 
+    and all other clusters' bundle points.
+    
+    Parameters
+    ----------
+    src_cid : int/str
+        The ID of the source cluster.
+    bundle_points : dict
+        Mapping of cluster_id -> (x, y) coordinates of bundle points.
+        
+    Returns
+    -------
+    dict
+        Mapping of dst_cid -> float (Euclidean distance)
+    """
+    distances = {}
+    if src_cid not in bundle_points:
+        return distances
+        
+    p_src = bundle_points[src_cid]
+    
+    for dst_cid, p_dst in bundle_points.items():
+        if src_cid == dst_cid:
+            continue
+            
+        # Euclidean distance between the two points
+        dist = np.sqrt((p_src[0] - p_dst[0])**2 + (p_src[1] - p_dst[1])**2)
+        distances[dst_cid] = dist
+        
+    return distances
+
+def _compute_exports_from_source(src_cid, data, clusters):
+    """
+    Calculate the total export amount from the source cluster to all other clusters.
+    
+    Parameters
+    ----------
+    src_cid : int/str
+        The ID of the source cluster.
+    data : pd.DataFrame
+        Trade matrix where index is origin (exports) and columns are destinations.
+    clusters : dict
+        Mapping of cluster_id -> list of countries.
+        
+    Returns
+    -------
+    dict
+        Mapping of dst_cid -> float (total export volume)
+    """
+    weights = {}
+    if src_cid not in clusters:
+        return weights
+        
+    # Get valid source countries available in the dataframe index
+    src_countries = [c for c in clusters[src_cid] if c in data.index]
+    if not src_countries:
+        return weights
+        
+    for dst_cid, dst_countries_list in clusters.items():
+        if src_cid == dst_cid:
+            continue
+            
+        # Get valid destination countries available in the dataframe columns
+        dst_countries = [c for c in dst_countries_list if c in data.columns]
+        
+        if not dst_countries:
+            continue
+            
+        # Sum the exports from all source countries to all destination countries
+        total_export = data.loc[src_countries, dst_countries].sum().sum()
+        weights[dst_cid] = float(total_export)
+            
+    return weights
+
+def _find_optimal_bundle_point_src(src_cid, data, centroids, clusters, radius, temp_bundle_points):
+    # TODO: Im not 100% happy with this func will need to change this
+    """
+    Finds the optimal bundling point for a source cluster.
+    """
+    if src_cid not in clusters:
+        return None
+
+    cluster_exports = _compute_exports_from_source(src_cid, data, clusters)
+    src_countries = [c for c in clusters[src_cid] if c in data.index and c in centroids]
+    if not src_countries:
+        return None
+        
+    src_points = np.array([centroids[c] for c in src_countries])
+    
+    # Get feasible regions as circles (center + radius)
+    areas = _feasible_areas(src_points, radius=radius)
+
+    def cost_function(p):
+        cost = 0
+        point = (p[0], p[1])
+        
+        # We need a copy so we don't mess up other optimizers running
+        test_points = temp_bundle_points.copy()
+        test_points[src_cid] = point
+        
+        dists = _compute_distances_from_source(src_cid, test_points)
+        
+        max_export = max(cluster_exports.values()) if cluster_exports else 1
+        
+        for dst_cid, dist in dists.items():
+            weight = cluster_exports.get(dst_cid, 1) / max_export
+            cost += dist * weight
+            
+        # Constraint: point must be inside at least one feasible circle
+        in_any_area = False
+        for a in areas:
+            center = a['center']
+            r = a['radius']
+            if np.linalg.norm(point - center) <= r:
+                in_any_area = True
+                break
+                
+        if not in_any_area:
+            cost += 9999999
+            
+        return cost
+
+    initial_guess = np.mean(src_points, axis=0)
+    result = minimize(cost_function, initial_guess, method='Nelder-Mead')
+    return tuple(initial_guess)
 
 def matplotlib_map_bundled(gdf, data, centroid_table, clusters, show_intra=True):
     """Draw a flow map with edge bundling between clusters.
@@ -194,7 +349,10 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, show_intra=True)
         for c in members:
             country_to_cluster[c] = cid
 
-    bs = compute_bundle_split_points(data, centroids, clusters)
+    # Pre-calculate bundle points, distances and exports so they're only computed once
+    bundle_points = compute_cluster_bundle_point(data, centroids, clusters)
+    
+    bs = compute_bundle_split_points(data, centroids, clusters, bundle_points=bundle_points)
 
     # Colour palette
     n_clusters = len(clusters)
@@ -205,6 +363,16 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, show_intra=True)
 
     # Compute arc-offset signs for trunks to minimise visual crossings
     trunk_offsets = _compute_trunk_offsets(bs)
+
+    max_cluster_export = max(info['total_flow'] for info in bs.values()) if bs else 1
+    
+    # Cache to store distances and exports
+    cluster_dists = {}
+    cluster_exports = {}
+    
+    for src_cid in clusters:
+        cluster_dists[src_cid] = _compute_distances_from_source(src_cid, bundle_points)
+        cluster_exports[src_cid] = _compute_exports_from_source(src_cid, data, clusters)
 
     # ── Draw inter-cluster bundled flows ──
     for (src_cid, dst_cid), info in bs.items():
@@ -233,6 +401,27 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, show_intra=True)
             lw = 0.3 + (w / max_q) * 3
             xs, ys = _smooth_curve(split_pt, centroids[country])
             _draw_curve_with_arrow(ax, xs, ys, color, lw, alpha=0.55)
+
+        # TODO: For debuging only REMOVE LATER Plot distance and text to map
+        dists = cluster_dists.get(src_cid, {})
+        exports = cluster_exports.get(src_cid, {})
+        
+        if dst_cid in dists and dst_cid in exports:
+            euclidean_dist = dists[dst_cid]
+            
+            # SCALING MATH: (current_export / max_cluster_export) * 100
+            scaled_export = (exports[dst_cid] / max_cluster_export) * 100
+
+            # Format the text box 
+            label_text = f"Dist: {euclidean_dist:.1f}\nExp: {scaled_export:.0f}"
+            
+            # Draw text near the split point
+            ax.text(split_pt[0] + 0.5, split_pt[1] + 0.5, label_text, 
+                    fontsize=7, 
+                    color='black', 
+                    family='monospace',
+                    bbox=dict(facecolor='white', alpha=0.7, edgecolor='none', boxstyle='round,pad=0.2'),
+                    zorder=10)
 
     # ── Draw intra-cluster flows as direct arcs ──
     if show_intra:
@@ -297,6 +486,25 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, show_intra=True)
     for (src_cid, dst_cid), info in bs.items():
         ax.plot(*info['bundle'], 'o', color='black', markersize=5, zorder=5)
         ax.plot(*info['split'],  's', color='black', markersize=5, zorder=5)
+
+    # TODO: REMOVE Vis after debugging
+    # ── Draw Feasible Areas as Circles (Debugging) ──
+    # Gather ALL source points globally to ensure exactly 1 circle per source
+    global_source_pts = [centroids[c] for c in source_countries if c in centroids]
+
+    if global_source_pts:
+        # Calculate feasible areas – now returns circles directly
+        areas = _feasible_areas(global_source_pts, radius=3.0) 
+        
+        for area in areas:
+            center = area['center']
+            circle_radius = area['radius']
+            # Create and add a single green circle patch per source point
+            circle = Circle(
+                (center[0], center[1]), circle_radius,
+                facecolor='green', alpha=0.3, edgecolor='green', zorder=2
+            )
+            ax.add_patch(circle)
 
     ax.set_xlim([-15, 45])
     ax.set_ylim([30, 75])
