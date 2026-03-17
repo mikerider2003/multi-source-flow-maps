@@ -60,7 +60,7 @@ def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_
     """Compute bundle and split points for every (src_cluster, dst_cluster) pair.
 
     Bundle points are precomputed once per source cluster (mean of countries).
-    Split points are computed per destination for each pair.
+    Split points are optimized within feasible areas around destination countries.
 
     Returns
     -------
@@ -104,9 +104,15 @@ def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_
             if not src_weights or not dst_weights:
                 continue
 
+            bundle_pt = bundle_points[src_cid]
+            # Optimize split point within feasible areas around destination countries
+            split_pt = _find_optimal_split_point_for_pair(
+                bundle_pt, dst_cid, centroids, clusters, radius=1.5, dst_weights=dst_weights
+            )
+
             result[(src_cid, dst_cid)] = {
-                'bundle': bundle_points[src_cid],
-                'split':  cost_fn(centroids, dst_weights),
+                'bundle': bundle_pt,
+                'split': split_pt,
                 'src_weights': src_weights,
                 'dst_weights': dst_weights,
                 'total_flow': sum(src_weights.values()),
@@ -196,6 +202,93 @@ def _feasible_areas(source_points, radius=3.0):
     src_arr = np.array(source_points)
     areas = [{'center': src, 'radius': radius} for src in src_arr]
     return areas
+
+def _find_optimal_split_point_for_pair(bundle_pt, dst_cid, centroids, clusters, radius=1.5, dst_weights=None):
+    """
+    Finds the optimal split point for a destination cluster.
+    Minimizes distance from split point to bundle point while staying within feasible areas.
+    
+    Parameters
+    ----------
+    bundle_pt : tuple
+        The bundle point (x, y) coordinates.
+    dst_cid : int/str
+        The destination cluster ID.
+    centroids : dict
+        Mapping of country name -> (x, y) coordinates.
+    clusters : dict
+        Mapping of cluster_id -> list of country names.
+    radius : float
+        Radius of feasible areas around destination countries.
+    dst_weights : dict, optional
+        Weights for destination countries (for fallback).
+        
+    Returns
+    -------
+    tuple
+        Optimal split point coordinates.
+    """
+    if dst_cid not in clusters:
+        return bundle_pt
+    
+    dst_countries = [c for c in clusters[dst_cid] if c in centroids]
+    if not dst_countries:
+        return bundle_pt
+    
+    dst_points = np.array([centroids[c] for c in dst_countries])
+    bundle_pt_arr = np.array(bundle_pt)
+    
+    # Get feasible regions as circles
+    areas = _feasible_areas(dst_points, radius=radius)
+    
+    def cost_function(p):
+        point = np.array([p[0], p[1]])
+        # Minimize distance to bundle point
+        dist_to_bundle = np.sqrt((point[0] - bundle_pt_arr[0])**2 + (point[1] - bundle_pt_arr[1])**2)
+        return dist_to_bundle
+    
+    def project_to_feasible(point):
+        """Project point into feasible region (closest point in any circle)."""
+        point = np.array(point)
+        
+        # Check if already in feasible region
+        for a in areas:
+            center = np.array(a['center'])
+            r = a['radius']
+            if np.linalg.norm(point - center) <= r:
+                return point
+        
+        # Find closest point on boundary of any circle
+        best_point = None
+        best_dist = float('inf')
+        
+        for a in areas:
+            center = np.array(a['center'])
+            r = a['radius']
+            direction = point - center
+            direction_norm = np.linalg.norm(direction)
+            
+            if direction_norm > 0:
+                closest = center + (direction / direction_norm) * r
+            else:
+                closest = center + np.array([r, 0])
+            
+            dist = np.linalg.norm(point - closest)
+            if dist < best_dist:
+                best_dist = dist
+                best_point = closest
+        
+        return best_point if best_point is not None else point
+    
+    # Start from weighted mean of destination countries or bundle point
+    if dst_weights:
+        initial_guess = compute_cost_weighted_mean(centroids, dst_weights)
+    else:
+        initial_guess = np.mean(dst_points, axis=0)
+    
+    result = minimize(cost_function, initial_guess, method='Nelder-Mead')
+    final_point = project_to_feasible(result.x)
+    return tuple(final_point)
 
 def _compute_distances_from_source(src_cid, bundle_points):
     """
