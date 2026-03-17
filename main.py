@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 
 import pandas as pd
 import numpy as np
+import math
 
 from modules.baseline import main_baseline    
 from modules.edge_bundling import matplotlib_map_bundled as mmb1
@@ -11,7 +12,7 @@ import modules.clustering as clustering
 
 
 
-def main_clustered():
+def main_clustered(n_clusters=None, show_intra=None, multiple_bundle_points=True):
     """Interactive mode: cluster countries geographically and let the user pick a source cluster."""
 
     # Load the GeoJSON file
@@ -25,51 +26,52 @@ def main_clustered():
 
     countries = list(data.index)
 
-    # TODO: REMOVE TESTING: Hard-code values
-    TESTING = True
-    # Number of clusters
-    n = 7
-    # Fixed cluster selection
-    m = 2
-    # Show intra-cluster edges
-    show_intra = False  
-
     # Ask the user how many clusters
-    # TODO: REMOVE TESTING
-    if not TESTING:
+    if n_clusters == None:
         while True:
             try:
-                n = int(input(f"How many clusters? (2-{len(countries)}): "))
-                if 2 <= n <= len(countries):
+                n_clusters = int(input(f"How many clusters? (2-{len(countries)}): "))
+                if 2 <= n_clusters <= len(countries):
                     break
             except ValueError:
                 pass
             print("Please enter a valid number.")
 
-    clusters = clustering.cluster_countries(centroid_table, countries, n)
+    clusters = clustering.cluster_countries(centroid_table, countries, n_clusters)
     
-    # TODO: REMOVE TESTING
-    if not TESTING:
-        source_countries = clustering.select_source_cluster(clusters)
-    else:
-        source_countries = clusters[m]
-
-    print(f"\nSource countries: {', '.join(sorted(source_countries))}")
-
-    # Filter data to only flows originating from the selected cluster
-    filtered = clustering.filter_data_by_sources(data, source_countries)
-    print(f"Showing exports from {len(filtered)} source countries to {len(filtered.columns)} destinations.\n")
-
-    # TODO: REMOVE TESTING
-    if not TESTING:
+    if show_intra == None:
         show_intra = input("Show intra-cluster edges (within the source cluster)? [y/n]: ").strip().lower() != 'n'
+    
+    n_keys = len(clusters)
+    cols = min(3, n_keys)
+    rows = math.ceil(n_keys / cols)
+    
+    fig, axes = plt.subplots(rows, cols, figsize=(6 * cols, 5 * rows))
+    axes = axes.flatten()
 
-    multiple_bundle_points = True
-    if multiple_bundle_points == True:
-        mmb2(gdf, filtered, centroid_table, clusters, show_intra=show_intra)
-    else:
-        mmb1(gdf, filtered, centroid_table, clusters, show_intra=show_intra)
+    for i, m in enumerate(sorted(clusters.keys())):
+        ax = axes[i]
+        source_countries = clusters[m]
+        print(f"\nSource cluster {m} countries: {', '.join(sorted(source_countries))}")
 
+        # Filter data to only flows originating from the selected cluster
+        filtered = clustering.filter_data_by_sources(data, source_countries)
+        print(f"Showing exports from {len(filtered)} source countries to {len(filtered.columns)} destinations.\n")
+
+        ax.set_title(f"Cluster {m}")
+
+        if multiple_bundle_points:
+            mmb2(gdf, filtered, centroid_table, clusters, show_intra=show_intra, ax=ax)
+        else:
+            mmb1(gdf, filtered, centroid_table, clusters, show_intra=show_intra, ax=ax)
+            
+    # Hide any unused subplots
+    for j in range(i + 1, len(axes)):
+        axes[j].axis('off')
+
+    plt.tight_layout()
+    plt.savefig("map.png")
+    # plt.show()
 
 
 if __name__ == "__main__":
@@ -77,6 +79,6 @@ if __name__ == "__main__":
     mode = "clustered"  # Options: "clustered", "full", "distant", "close", "2_clusters", "3_clusters", "5_clusters"
 
     if mode == "clustered":
-        main_clustered()
+        main_clustered(n_clusters = 7, show_intra=False, multiple_bundle_points=False)
     else:
         main_baseline(mode)

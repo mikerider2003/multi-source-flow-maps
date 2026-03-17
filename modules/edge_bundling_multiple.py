@@ -392,7 +392,7 @@ def _find_optimal_bundle_point_for_pair(src_cid, dst_cid, centroids, clusters, r
     final_point = project_to_feasible(result.x)
     return tuple(final_point)
 
-def matplotlib_map_bundled(gdf, data, centroid_table, clusters, show_intra=True):
+def matplotlib_map_bundled(gdf, data, centroid_table, clusters, show_intra=True, ax=None):
     """Draw a flow map with edge bundling between clusters.
 
     Rendering per (src_cluster, dst_cluster):
@@ -401,7 +401,12 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, show_intra=True)
       3. Thin edges: split point  →  each destination country
     Intra-cluster flows are drawn as direct curved arrows if show_intra=True.
     """
-    fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+    if ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+        return_fig = True
+    else:
+        return_fig = False
+
     gdf.plot(ax=ax, color='lightblue', edgecolor='black', linewidth=0.5)
 
     # Build centroid lookup
@@ -548,7 +553,9 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, show_intra=True)
     ax.set_ylim([30, 75])
     ax.set_xticks([])
     ax.set_yticks([])
-    plt.tight_layout()
-    # plt.show()
-
-    plt.savefig("map.png")
+    
+    if return_fig:
+        plt.tight_layout()
+        plt.savefig("map.png")
+    
+    return ax
