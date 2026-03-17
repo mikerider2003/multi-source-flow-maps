@@ -5,7 +5,8 @@ import pandas as pd
 import numpy as np
 
 from modules.baseline import main_baseline    
-from modules.edge_bundling import matplotlib_map_bundled
+from modules.edge_bundling import matplotlib_map_bundled as mmb1
+from modules.edge_bundling_multiple import matplotlib_map_bundled as mmb2
 import modules.clustering as clustering
 
 
@@ -63,7 +64,12 @@ def main_clustered():
     if not TESTING:
         show_intra = input("Show intra-cluster edges (within the source cluster)? [y/n]: ").strip().lower() != 'n'
 
-    matplotlib_map_bundled(gdf, filtered, centroid_table, clusters, show_intra=show_intra)
+    multiple_bundle_points = True
+    if multiple_bundle_points == True:
+        mmb2(gdf, filtered, centroid_table, clusters, show_intra=show_intra)
+    else:
+        mmb1(gdf, filtered, centroid_table, clusters, show_intra=show_intra)
+
 
 
 if __name__ == "__main__":
