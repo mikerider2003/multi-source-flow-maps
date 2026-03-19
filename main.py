@@ -103,6 +103,6 @@ if __name__ == "__main__":
     mode = "clustered"  # Options: "clustered", "full", "distant", "close", "2_clusters", "3_clusters", "5_clusters"
 
     if mode == "clustered":
-        main_clustered(n_clusters = 7, show_intra=False, multiple_bundle_points=True, bundle_radius=3.0, split_radius=0)
+        main_clustered(n_clusters = 7, show_intra=False, multiple_bundle_points=True, bundle_radius=0, split_radius=0)
     else:
         main_baseline(mode)
