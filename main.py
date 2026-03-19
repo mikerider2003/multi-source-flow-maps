@@ -12,8 +12,29 @@ import modules.clustering as clustering
 
 
 
-def main_clustered(n_clusters=None, show_intra=None, multiple_bundle_points=True):
-    """Interactive mode: cluster countries geographically and let the user pick a source cluster."""
+def main_clustered(n_clusters=None, show_intra=None, multiple_bundle_points=True, radius=3.0):
+    """
+    Partitions countries into clusters, then generates a flow map with bundled edges between clusters.
+
+    Parameters
+    ----------
+    n_clusters : int or None
+        The number of clusters to partition the countries into.
+        If None, will ask the user in a CLI dialog.
+    show_intra : bool or None
+        Whether to show export edges within a source cluster.
+        If None, will ask the user in a CLI dialog.
+    multiple_bundle_points : bool
+        Whether to use on bundle point *per target cluster* (True) or share one point for *all target clusters* (False)
+    radius : float
+        Radius for feasible regions to place bundle points in.
+        If 0, will ignore feasible regions and place bundling points based on a different cost function.
+        
+    Returns
+    -------
+    map.png
+        Saves an image containing one flow map for each cluster with that cluster as the source.
+    """
 
     # Load the GeoJSON file
     gdf = gpd.read_file("data/geo.json")
@@ -61,9 +82,9 @@ def main_clustered(n_clusters=None, show_intra=None, multiple_bundle_points=True
         ax.set_title(f"Cluster {m}")
 
         if multiple_bundle_points:
-            mmb2(gdf, filtered, centroid_table, clusters, show_intra=show_intra, ax=ax)
+            mmb2(gdf, filtered, centroid_table, clusters, show_intra=show_intra, ax=ax, radius=radius)
         else:
-            mmb1(gdf, filtered, centroid_table, clusters, show_intra=show_intra, ax=ax)
+            mmb1(gdf, filtered, centroid_table, clusters, show_intra=show_intra, ax=ax, radius=radius)
             
     # Hide any unused subplots
     for j in range(i + 1, len(axes)):
@@ -79,6 +100,6 @@ if __name__ == "__main__":
     mode = "clustered"  # Options: "clustered", "full", "distant", "close", "2_clusters", "3_clusters", "5_clusters"
 
     if mode == "clustered":
-        main_clustered(n_clusters = 7, show_intra=False, multiple_bundle_points=False)
+        main_clustered(n_clusters = 7, show_intra=False, multiple_bundle_points=True, radius=0)
     else:
         main_baseline(mode)
