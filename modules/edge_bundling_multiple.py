@@ -65,7 +65,7 @@ def compute_cluster_bundle_points_per_pair(data, centroids, clusters, radius=3.0
     
     return bundle_points
 
-def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_points=None):
+def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_points=None, bundle_radius=3.0, split_radius=1.5):
     """Compute bundle and split points for every (src_cluster, dst_cluster) pair.
 
     Bundle points are optimized per source-destination pair to minimize distance between cluster means.
@@ -86,7 +86,7 @@ def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_
 
     # Precompute bundle points per source-destination pair if not provided
     if bundle_points is None:
-        bundle_points = compute_cluster_bundle_points_per_pair(data, centroids, clusters)
+        bundle_points = compute_cluster_bundle_points_per_pair(data, centroids, clusters, radius=bundle_radius)
 
     result = {}
     for src_cid in clusters:
@@ -119,7 +119,7 @@ def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_
 
             # Optimize split point within feasible areas around destination countries
             split_pt = _find_optimal_split_point_for_pair(
-                bundle_pt, dst_cid, centroids, clusters, radius=1.5, dst_weights=dst_weights
+                bundle_pt, dst_cid, centroids, clusters, radius=split_radius, dst_weights=dst_weights
             )
 
             result[(src_cid, dst_cid)] = {
@@ -215,7 +215,7 @@ def _feasible_areas(source_points, radius=3.0):
     areas = [{'center': src, 'radius': radius} for src in src_arr]
     return areas
 
-def _find_optimal_split_point_for_pair(bundle_pt, dst_cid, centroids, clusters, radius=1.5, dst_weights=None):
+def _find_optimal_split_point_for_pair(bundle_pt, dst_cid, centroids, clusters, radius=1.5, dst_weights=None, dst_src_weight_ratio = 1.3):
     """
     Finds the optimal split point for a destination cluster.
     Minimizes distance from split point to bundle point while staying within feasible areas.
@@ -234,6 +234,10 @@ def _find_optimal_split_point_for_pair(bundle_pt, dst_cid, centroids, clusters, 
         Radius of feasible areas around destination countries.
     dst_weights : dict, optional
         Weights for destination countries (for fallback).
+    dst_src_weight_ratio : float
+        Only used if radius = 0. 
+        Measures how much we value placing the splitting point close to the sink countries over the source countries.
+        Around 1.2-1.3 is a good ratio in general.
         
     Returns
     -------
@@ -255,9 +259,19 @@ def _find_optimal_split_point_for_pair(bundle_pt, dst_cid, centroids, clusters, 
     
     def cost_function(p):
         point = np.array([p[0], p[1]])
-        # Minimize distance to bundle point
-        dist_to_bundle = np.sqrt((point[0] - bundle_pt_arr[0])**2 + (point[1] - bundle_pt_arr[1])**2)
-        return dist_to_bundle
+
+        ### OLD: Only distance from split point to bundle point ###
+        if radius > 0:
+            cost = np.linalg.norm(point - bundle_pt_arr)
+
+        ### NEW: Cost is dependent on distance to source countries (high weight) and destination countries (low weight) ###
+        # This is entirely analogous to the computation in _find_optimal_bundle_point_for_pair().
+        else:
+            dist_to_dst = np.sum([np.linalg.norm(point - dst_point) for dst_point in dst_points]) / len(dst_points) # Unweighted
+            dist_to_src = np.linalg.norm(point - bundle_pt_arr)
+            cost = dst_src_weight_ratio * dist_to_dst + dist_to_src
+        
+        return cost
     
     def project_to_feasible(point):
         """Project point into feasible region (closest point in any circle)."""
@@ -299,10 +313,15 @@ def _find_optimal_split_point_for_pair(bundle_pt, dst_cid, centroids, clusters, 
         initial_guess = np.mean(dst_points, axis=0)
     
     result = minimize(cost_function, initial_guess, method='Nelder-Mead')
-    final_point = project_to_feasible(result.x)
+
+    if radius > 0:  # OLD: Project to feasible region
+        final_point = project_to_feasible(result.x)
+    else:           # NEW: Don't project
+        final_point = result.x
+
     return tuple(final_point)
 
-def _find_optimal_bundle_point_for_pair(src_cid, dst_cid, centroids, clusters, radius, cluster_means, src_dst_weight_ratio = 1.1):
+def _find_optimal_bundle_point_for_pair(src_cid, dst_cid, centroids, clusters, radius, cluster_means, src_dst_weight_ratio = 1.2):
     """
     Finds the optimal bundling point for a source cluster targeting a destination cluster.
     Minimizes the distance from source cluster mean to destination cluster mean.
@@ -355,7 +374,7 @@ def _find_optimal_bundle_point_for_pair(src_cid, dst_cid, centroids, clusters, r
         
         ### OLD: Only distance from bundle point to destination cluster mean ###
         if radius > 0:
-            cost = np.sqrt((point[0] - dst_mean[0])**2 + (point[1] - dst_mean[1])**2)
+            cost = np.linalg.norm(point - dst_mean)
 
         ### NEW: Cost is dependent on distance to source countries (high weight) and destination countries (low weight) ###
         else:
@@ -412,7 +431,7 @@ def _find_optimal_bundle_point_for_pair(src_cid, dst_cid, centroids, clusters, r
 
     return tuple(final_point)
 
-def matplotlib_map_bundled(gdf, data, centroid_table, clusters, radius=3.0, show_intra=True, ax=None):
+def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.0, split_radius=1.5, show_intra=True, ax=None):
     """Draw a flow map with edge bundling between clusters.
 
     Rendering per (src_cluster, dst_cluster):
@@ -442,9 +461,9 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, radius=3.0, show
             country_to_cluster[c] = cid
 
     # Pre-calculate bundle points for all source-destination pairs
-    bundle_points = compute_cluster_bundle_points_per_pair(data, centroids, clusters, radius=radius)
+    bundle_points = compute_cluster_bundle_points_per_pair(data, centroids, clusters, radius=bundle_radius)
     
-    bs = compute_bundle_split_points(data, centroids, clusters, bundle_points=bundle_points)
+    bs = compute_bundle_split_points(data, centroids, clusters, bundle_points=bundle_points, bundle_radius=bundle_radius, split_radius=split_radius)
 
     # Colour palette
     n_clusters = len(clusters)
