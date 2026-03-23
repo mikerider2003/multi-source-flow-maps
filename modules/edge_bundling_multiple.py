@@ -565,13 +565,14 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
                 zorder=6, alpha=0.7)
 
     # Debug markers: bundle (●) and split (■) points
-    for (src_cid, dst_cid), info in bs.items():
-        ax.plot(*info['bundle'], 'o', color='black', markersize=5, zorder=5)
-        ax.plot(*info['split'],  's', color='black', markersize=5, zorder=5)
+    #for (src_cid, dst_cid), info in bs.items():
+    #    ax.plot(*info['bundle'], 'o', color='black', markersize=5, zorder=5)
+    #    ax.plot(*info['split'],  's', color='black', markersize=5, zorder=5)
 
     # TODO: REMOVE Vis after debugging
     # ── Draw Feasible Areas as Circles (Debugging) ──
     # Gather ALL source points globally to ensure exactly 1 circle per source
+    '''
     global_source_pts = [centroids[c] for c in source_countries if c in centroids]
 
     if global_source_pts:
@@ -587,6 +588,7 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
                 facecolor='green', alpha=0.3, edgecolor='green', zorder=2
             )
             ax.add_patch(circle)
+    '''
 
     ax.set_xlim([-15, 45])
     ax.set_ylim([30, 75])
