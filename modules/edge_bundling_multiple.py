@@ -232,9 +232,10 @@ def _feasible_areas(source_points, radius=3.0):
     areas = [{'center': src, 'radius': radius} for src in src_arr]
     return areas
 
-def _find_optimal_split_point_for_pair(bundle_pt, dst_cid, centroids, clusters, radius=1.5, dst_weights=None, dst_src_weight_ratio = 1.3):
+def _find_optimal_split_point_for_pair(bundle_pt, dst_cid, centroids, clusters, radius=1.5, dst_weights=None, dst_src_weight_ratio=1.3, min_arc_length=2.0, min_arc_penalty=2.0):
     """Find the optimal split point for a destination cluster.
     Minimizes distance from split point to bundle point while staying in feasible areas.
+    Also penalizes positions that would make any destination arc shorter than min_arc_length.
 
     Parameters
     ----------
@@ -247,6 +248,9 @@ def _find_optimal_split_point_for_pair(bundle_pt, dst_cid, centroids, clusters, 
     dst_src_weight_ratio :  only used if radius = 0.
                             How much we value proximity to sink countries vs source countries.
                             Around 1.2-1.3 works well.
+    min_arc_length :        minimum desired distance (data coords) from the split point to
+                            each destination country. Arcs shorter than this get penalized.
+    min_arc_penalty :       strength of the penalty for short arcs.
 
     Returns (x, y) of the optimal split point.
     """
@@ -266,14 +270,17 @@ def _find_optimal_split_point_for_pair(bundle_pt, dst_cid, centroids, clusters, 
         point = np.array([p[0], p[1]])
 
         if radius > 0:
-            # Only distance from split point to bundle point
             cost = np.linalg.norm(point - bundle_pt_arr)
         else:
-            # Weighted combination: distance to destinations + distance to bundle point
-            # (analogous to _find_optimal_bundle_point_for_pair)
             dist_to_dst = np.sum([np.linalg.norm(point - dst_point) for dst_point in dst_points]) / len(dst_points)
             dist_to_src = np.linalg.norm(point - bundle_pt_arr)
             cost = dst_src_weight_ratio * dist_to_dst + dist_to_src
+
+        # Penalize being too close to any destination country
+        for dst_point in dst_points:
+            d = np.linalg.norm(point - dst_point)
+            if d < min_arc_length:
+                cost += min_arc_penalty * (min_arc_length - d) ** 2
 
         return cost
 
@@ -322,9 +329,10 @@ def _find_optimal_split_point_for_pair(bundle_pt, dst_cid, centroids, clusters, 
 
     return tuple(final_point)
 
-def _find_optimal_bundle_point_for_pair(src_cid, dst_cid, centroids, clusters, radius, cluster_means, src_dst_weight_ratio = 1.2):
+def _find_optimal_bundle_point_for_pair(src_cid, dst_cid, centroids, clusters, radius, cluster_means, src_dst_weight_ratio=1.2, min_arc_length=2.0, min_arc_penalty=2.0):
     """Find the optimal bundling point for a source cluster targeting a destination cluster.
     Minimizes distance from source cluster mean to destination cluster mean.
+    Also penalizes positions that would make any source arc shorter than min_arc_length.
 
     Parameters
     ----------
@@ -339,6 +347,9 @@ def _find_optimal_bundle_point_for_pair(src_cid, dst_cid, centroids, clusters, r
     src_dst_weight_ratio :  only used if radius = 0.
                             How much we value proximity to source countries vs destinations.
                             Around 1.1-1.2 works well if source distance is unweighted.
+    min_arc_length :        minimum desired distance (data coords) from the bundle point to
+                            each source country. Arcs shorter than this get penalized.
+    min_arc_penalty :       strength of the penalty for short arcs.
 
     Returns (x, y) or None.
     """
@@ -361,15 +372,19 @@ def _find_optimal_bundle_point_for_pair(src_cid, dst_cid, centroids, clusters, r
         point = np.array([p[0], p[1]])
 
         if radius > 0:
-            # Only distance to destination cluster mean
             cost = np.linalg.norm(point - dst_mean)
         else:
-            # Weighted combination: distance to sources + distance to destination mean
             dist_to_src = np.sum([np.linalg.norm(point - src_point) for src_point in src_points]) / len(src_points)
             # Could weight by export: need to supply export data in function arguments
             #dist_to_src = np.sum([np.linalg.norm(point - src_points[i]) * data.loc[src_countries[i], clusters[dst_cid]].sum() for i in range(len(src_countries))]) / data.loc[src_countries, clusters[dst_cid]].sum().sum()
             dist_to_dst = np.linalg.norm(point - dst_mean)
             cost = src_dst_weight_ratio * dist_to_src + dist_to_dst
+
+        # Penalize being too close to any source country
+        for src_point in src_points:
+            d = np.linalg.norm(point - src_point)
+            if d < min_arc_length:
+                cost += min_arc_penalty * (min_arc_length - d) ** 2
 
         return cost
 
@@ -491,6 +506,16 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
         dst_branches = [(c, w, _branch_lw(w))
                         for c, w in info['dst_weights'].items()
                         if c in centroids]
+
+        # Sort branches by their projection onto the perpendicular so that
+        # left-side countries get left slots and right-side countries get
+        # right slots, preventing crossings near the junction.
+        def _perp_proj(country):
+            pt_disp = ax.transData.transform(centroids[country])
+            return np.dot(pt_disp, perp_disp)
+
+        src_branches.sort(key=lambda b: _perp_proj(b[0]))
+        dst_branches.sort(key=lambda b: _perp_proj(b[0]))
 
         trunk_lw = sum(lw for _, _, lw in src_branches) if src_branches else 1.0
 
