@@ -10,10 +10,8 @@ from modules.centroids import get_centroid
 
 
 def compute_cost_weighted_mean(positions, weights):
-    """Default cost function: weighted mean of positions.
-
-    Minimises  sum_i  w_i * ||p - x_i||^2.
-    You can swap this out for any function with the same signature:
+    """Weighted mean of positions. Minimises sum_i w_i * ||p - x_i||^2.
+    Can be swapped for any function with signature:
         (positions: dict[str, (x,y)], weights: dict[str, float]) -> (x, y)
     """
     total_w = sum(weights.values())
@@ -26,17 +24,13 @@ def compute_cost_weighted_mean(positions, weights):
     return (x, y)
 
 def compute_cluster_bundle_points_per_pair(data, centroids, clusters, radius=3.0):
-    """
-    Compute optimal bundle points for each (src_cluster, dst_cluster) pair.
+    """Compute optimal bundle points for each (src_cluster, dst_cluster) pair.
     Each bundle point minimizes distance from source cluster mean to destination cluster mean.
-    
-    Returns
-    -------
-    dict : (src_cid, dst_cid) -> (x, y)
+
+    Returns dict: (src_cid, dst_cid) -> (x, y)
     """
     bundle_points = {}
-    
-    # Precompute cluster means for all clusters
+
     cluster_means = {}
     for cid, countries in clusters.items():
         valid = [c for c in countries if c in centroids]
@@ -44,36 +38,33 @@ def compute_cluster_bundle_points_per_pair(data, centroids, clusters, radius=3.0
             xs = [centroids[c][0] for c in valid]
             ys = [centroids[c][1] for c in valid]
             cluster_means[cid] = (float(np.mean(xs)), float(np.mean(ys)))
-    
-    # Optimize bundle point for each source->destination pair
+
     for src_cid in clusters:
         is_source = any(c in data.index for c in clusters[src_cid])
         if not is_source:
             continue
-            
+
         for dst_cid in clusters:
             if src_cid == dst_cid:
                 continue
             if dst_cid not in cluster_means:
                 continue
-                
+
             opt_pt = _find_optimal_bundle_point_for_pair(
                 src_cid, dst_cid, centroids, clusters, radius, cluster_means
             )
             if opt_pt:
                 bundle_points[(src_cid, dst_cid)] = opt_pt
-    
+
     return bundle_points
 
 def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_points=None, bundle_radius=3.0, split_radius=1.5):
     """Compute bundle and split points for every (src_cluster, dst_cluster) pair.
 
-    Bundle points are optimized per source-destination pair to minimize distance between cluster means.
+    Bundle points are optimized per pair to minimize distance between cluster means.
     Split points are optimized within feasible areas around destination countries.
 
-    Returns
-    -------
-    dict : (src_cid, dst_cid) -> {
+    Returns dict: (src_cid, dst_cid) -> {
         'bundle': (x, y),
         'split': (x, y),
         'src_weights': {country: flow_total},
@@ -84,7 +75,6 @@ def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_
     if cost_fn is None:
         cost_fn = compute_cost_weighted_mean
 
-    # Precompute bundle points per source-destination pair if not provided
     if bundle_points is None:
         bundle_points = compute_cluster_bundle_points_per_pair(data, centroids, clusters, radius=bundle_radius)
 
@@ -117,7 +107,6 @@ def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_
             if not src_weights or not dst_weights:
                 continue
 
-            # Optimize split point within feasible areas around destination countries
             split_pt = _find_optimal_split_point_for_pair(
                 bundle_pt, dst_cid, centroids, clusters, radius=split_radius, dst_weights=dst_weights
             )
@@ -133,10 +122,8 @@ def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_
 
 
 def _smooth_curve(p0, p1, offset=0.08, n=40):
-    """Return a gentle cubic-spline arc between two points.
-
-    Positive offset curves the arc one way, negative curves the other.
-    This sign is exploited by _compute_trunk_offsets to separate crossing trunks.
+    """Cubic-spline arc between two points.
+    Positive offset curves one way, negative the other.
     """
     mid = ((p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2)
     dx, dy = p1[0] - p0[0], p1[1] - p0[1]
@@ -149,8 +136,47 @@ def _smooth_curve(p0, p1, offset=0.08, n=40):
     return cs_x(t_smooth), cs_y(t_smooth)
 
 
+def _cubic_bezier(p0, p1, p2, p3, n=50):
+    """Evaluate a cubic Bezier curve from four control points.
+    Returns (xs, ys) arrays of length n.
+    """
+    p0, p1, p2, p3 = (np.asarray(p) for p in (p0, p1, p2, p3))
+    t = np.linspace(0, 1, n)[:, None]
+    curve = (1-t)**3 * p0 + 3*(1-t)**2*t * p1 + 3*(1-t)*t**2 * p2 + t**3 * p3
+    return curve[:, 0], curve[:, 1]
+
+
+def _smooth_curve_directed(p0, p1, tangent_out=None, tangent_in=None,
+                           strength=0.35, n=50):
+    """Cubic Bezier between p0 and p1 with optional tangent constraints.
+
+    tangent_out: direction the curve leaves p0 (defaults to straight line p0 -> p1)
+    tangent_in:  direction the curve arrives at p1 from (defaults to straight line p0 -> p1)
+    strength:    how far control points sit from endpoints, as fraction of chord length
+    """
+    p0, p1 = np.asarray(p0, float), np.asarray(p1, float)
+    chord = np.linalg.norm(p1 - p0)
+    arm = chord * strength
+
+    if tangent_out is not None:
+        t_out = np.asarray(tangent_out, float)
+        t_out = t_out / (np.linalg.norm(t_out) + 1e-12)
+    else:
+        t_out = (p1 - p0) / (chord + 1e-12)
+
+    if tangent_in is not None:
+        t_in = np.asarray(tangent_in, float)
+        t_in = t_in / (np.linalg.norm(t_in) + 1e-12)
+    else:
+        t_in = (p1 - p0) / (chord + 1e-12)
+
+    cp1 = p0 + t_out * arm
+    cp2 = p1 - t_in  * arm
+    return _cubic_bezier(p0, cp1, cp2, p1, n=n)
+
+
 def _segments_cross(a, b, c, d):
-    """Return True if segment a→b properly (not at endpoints) intersects c→d."""
+    """True if segment a->b properly intersects c->d (not at endpoints)."""
     def _cross2d(o, p, q):
         return (p[0] - o[0]) * (q[1] - o[1]) - (p[1] - o[1]) * (q[0] - o[0])
     d1 = _cross2d(c, d, a)
@@ -161,15 +187,7 @@ def _segments_cross(a, b, c, d):
 
 
 def _compute_trunk_offsets(bs_points, base_offset=0.15):
-    """Assign an arc-offset sign to every trunk so that crossing pairs arc
-    in opposite directions, visually separating them.
-
-    This is the crossing-minimization cost function: for each pair of trunk
-    segments whose straight-line extents intersect, one gets +base_offset and
-    the other gets -base_offset.  Swap or extend this logic to implement a
-    different crossing-cost criterion (e.g. a continuous penalty minimized via
-    scipy.optimize).
-    """
+    """Assign arc-offset signs so crossing trunk pairs arc in opposite directions."""
     keys = list(bs_points.keys())
     offsets = {k: base_offset for k in keys}
     for i in range(len(keys)):
@@ -179,254 +197,219 @@ def _compute_trunk_offsets(bs_points, base_offset=0.15):
                 bs_points[ki]['bundle'], bs_points[ki]['split'],
                 bs_points[kj]['bundle'], bs_points[kj]['split'],
             ):
-                # Arc the two crossing trunks in opposite directions
                 offsets[kj] = -offsets[ki]
     return offsets
 
 
-def _draw_curve_with_arrow(ax, xs, ys, color, lw, alpha):
-    """Draw a precomputed curve with a filled arrowhead at its tip."""
-    split = max(2, len(xs) - 5)
-    # Curve body
-    ax.plot(xs[:split], ys[:split], color=color, lw=lw, alpha=alpha,
-            solid_capstyle='round', zorder=3)
-    # Final short segment + arrowhead
-    ax.annotate(
-        "",
-        xy=(xs[-1], ys[-1]),
-        xytext=(xs[split - 1], ys[split - 1]),
-        arrowprops=dict(
-            arrowstyle="-|>",
-            color=color,
-            lw=lw,
-            alpha=alpha,
-            mutation_scale=6 + lw * 2,
-        ),
-        zorder=4,
-    )
+def _draw_curve(ax, xs, ys, color, lw, alpha, arrow=True):
+    """Draw a sampled curve, optionally with an arrowhead at the end."""
+    if arrow:
+        split = max(2, len(xs) - 5)
+        ax.plot(xs[:split], ys[:split], color=color, lw=lw, alpha=alpha,
+                solid_capstyle='round', zorder=3)
+        ax.annotate(
+            "",
+            xy=(xs[-1], ys[-1]),
+            xytext=(xs[split - 1], ys[split - 1]),
+            arrowprops=dict(
+                arrowstyle="-|>",
+                color=color,
+                lw=lw,
+                alpha=alpha,
+                mutation_scale=6 + lw * 2,
+            ),
+            zorder=4,
+        )
+    else:
+        ax.plot(xs, ys, color=color, lw=lw, alpha=alpha,
+                solid_capstyle='round', zorder=3)
 
 def _feasible_areas(source_points, radius=3.0):
-    """
-    Returns a list of feasible regions as circles, each defined by a center
-    and a radius. Currently all circles have the same radius, but this can be
-    extended later (e.g., different radii per source point).
+    """Returns a list of feasible regions as circles (center + radius).
+    Currently all circles share the same radius.
     """
     src_arr = np.array(source_points)
     areas = [{'center': src, 'radius': radius} for src in src_arr]
     return areas
 
 def _find_optimal_split_point_for_pair(bundle_pt, dst_cid, centroids, clusters, radius=1.5, dst_weights=None, dst_src_weight_ratio = 1.3):
-    """
-    Finds the optimal split point for a destination cluster.
-    Minimizes distance from split point to bundle point while staying within feasible areas.
-    
+    """Find the optimal split point for a destination cluster.
+    Minimizes distance from split point to bundle point while staying in feasible areas.
+
     Parameters
     ----------
-    bundle_pt : tuple
-        The bundle point (x, y) coordinates.
-    dst_cid : int/str
-        The destination cluster ID.
-    centroids : dict
-        Mapping of country name -> (x, y) coordinates.
-    clusters : dict
-        Mapping of cluster_id -> list of country names.
-    radius : float
-        Radius of feasible areas around destination countries.
-    dst_weights : dict, optional
-        Weights for destination countries (for fallback).
-    dst_src_weight_ratio : float
-        Only used if radius = 0. 
-        Measures how much we value placing the splitting point close to the sink countries over the source countries.
-        Around 1.2-1.3 is a good ratio in general.
-        
-    Returns
-    -------
-    tuple
-        Optimal split point coordinates.
+    bundle_pt :             (x, y) coordinates of the bundle point.
+    dst_cid :               destination cluster ID.
+    centroids :             country name -> (x, y).
+    clusters :              cluster_id -> list of country names.
+    radius :                radius of feasible areas around destination countries.
+    dst_weights :           weights for destination countries (optional, used as fallback).
+    dst_src_weight_ratio :  only used if radius = 0.
+                            How much we value proximity to sink countries vs source countries.
+                            Around 1.2-1.3 works well.
+
+    Returns (x, y) of the optimal split point.
     """
     if dst_cid not in clusters:
         return bundle_pt
-    
+
     dst_countries = [c for c in clusters[dst_cid] if c in centroids]
     if not dst_countries:
         return bundle_pt
-    
+
     dst_points = np.array([centroids[c] for c in dst_countries])
     bundle_pt_arr = np.array(bundle_pt)
-    
-    # Get feasible regions as circles
+
     areas = _feasible_areas(dst_points, radius=radius)
-    
+
     def cost_function(p):
         point = np.array([p[0], p[1]])
 
-        ### OLD: Only distance from split point to bundle point ###
         if radius > 0:
+            # Only distance from split point to bundle point
             cost = np.linalg.norm(point - bundle_pt_arr)
-
-        ### NEW: Cost is dependent on distance to source countries (high weight) and destination countries (low weight) ###
-        # This is entirely analogous to the computation in _find_optimal_bundle_point_for_pair().
         else:
-            dist_to_dst = np.sum([np.linalg.norm(point - dst_point) for dst_point in dst_points]) / len(dst_points) # Unweighted
+            # Weighted combination: distance to destinations + distance to bundle point
+            # (analogous to _find_optimal_bundle_point_for_pair)
+            dist_to_dst = np.sum([np.linalg.norm(point - dst_point) for dst_point in dst_points]) / len(dst_points)
             dist_to_src = np.linalg.norm(point - bundle_pt_arr)
             cost = dst_src_weight_ratio * dist_to_dst + dist_to_src
-        
+
         return cost
-    
+
     def project_to_feasible(point):
-        """Project point into feasible region (closest point in any circle)."""
+        """Project point to closest position inside any feasible circle."""
         point = np.array(point)
-        
-        # Check if already in feasible region
+
         for a in areas:
             center = np.array(a['center'])
             r = a['radius']
             if np.linalg.norm(point - center) <= r:
                 return point
-        
-        # Find closest point on boundary of any circle
+
         best_point = None
         best_dist = float('inf')
-        
+
         for a in areas:
             center = np.array(a['center'])
             r = a['radius']
             direction = point - center
             direction_norm = np.linalg.norm(direction)
-            
+
             if direction_norm > 0:
                 closest = center + (direction / direction_norm) * r
             else:
                 closest = center + np.array([r, 0])
-            
+
             dist = np.linalg.norm(point - closest)
             if dist < best_dist:
                 best_dist = dist
                 best_point = closest
-        
+
         return best_point if best_point is not None else point
-    
-    # Start from weighted mean of destination countries or bundle point
+
     if dst_weights:
         initial_guess = compute_cost_weighted_mean(centroids, dst_weights)
     else:
         initial_guess = np.mean(dst_points, axis=0)
-    
+
     result = minimize(cost_function, initial_guess, method='Nelder-Mead')
 
-    if radius > 0:  # OLD: Project to feasible region
+    if radius > 0:
         final_point = project_to_feasible(result.x)
-    else:           # NEW: Don't project
+    else:
         final_point = result.x
 
     return tuple(final_point)
 
 def _find_optimal_bundle_point_for_pair(src_cid, dst_cid, centroids, clusters, radius, cluster_means, src_dst_weight_ratio = 1.2):
-    """
-    Finds the optimal bundling point for a source cluster targeting a destination cluster.
-    Minimizes the distance from source cluster mean to destination cluster mean.
-    
+    """Find the optimal bundling point for a source cluster targeting a destination cluster.
+    Minimizes distance from source cluster mean to destination cluster mean.
+
     Parameters
     ----------
-    src_cid : int/str
-        The source cluster ID.
-    dst_cid : int/str
-        The destination cluster ID.
-    centroids : dict
-        Mapping of country name -> (x, y) coordinates.
-    clusters : dict
-        Mapping of cluster_id -> list of country names.
-    radius : float
-        Radius of feasible areas around source points.
-        If 0, do not compute or project to feasible regions; 
-        instead use a different cost function that factors in distance to source countries as well.
-    cluster_means : dict
-        Precomputed cluster means: cluster_id -> (x, y).
-    src_dst_weight_ratio : float
-        Only used if radius = 0. 
-        Measures how much we value placing the bundle point close to the source countries over the destination countries.
-        Around 1.1-1.2 is a good ratio if source distance is not weighted by export.
-        
-        
-    Returns
-    -------
-    tuple or None
-        Optimal bundle point coordinates, or None if optimization fails.
+    src_cid :               source cluster ID.
+    dst_cid :               destination cluster ID.
+    centroids :             country name -> (x, y).
+    clusters :              cluster_id -> list of country names.
+    radius :                radius of feasible areas around source points.
+                            If 0, uses a different cost function that also factors in
+                            distance to source countries.
+    cluster_means :         precomputed cluster_id -> (x, y).
+    src_dst_weight_ratio :  only used if radius = 0.
+                            How much we value proximity to source countries vs destinations.
+                            Around 1.1-1.2 works well if source distance is unweighted.
+
+    Returns (x, y) or None.
     """
     if src_cid not in clusters or dst_cid not in clusters:
         return None
-    
+
     src_countries = [c for c in clusters[src_cid] if c in centroids]
     if not src_countries:
         return None
-    
+
     dst_mean = cluster_means.get(dst_cid)
     if not dst_mean:
         return None
-    
+
     src_points = np.array([centroids[c] for c in src_countries])
-    
-    # Get feasible regions as circles (center + radius)
+
     areas = _feasible_areas(src_points, radius=radius)
-    
+
     def cost_function(p):
         point = np.array([p[0], p[1]])
-        
-        ### OLD: Only distance from bundle point to destination cluster mean ###
-        if radius > 0:
-            cost = np.linalg.norm(point - dst_mean)
 
-        ### NEW: Cost is dependent on distance to source countries (high weight) and destination countries (low weight) ###
+        if radius > 0:
+            # Only distance to destination cluster mean
+            cost = np.linalg.norm(point - dst_mean)
         else:
-            dist_to_src = np.sum([np.linalg.norm(point - src_point) for src_point in src_points]) / len(src_points) # Unweighted
-            # Weighted by export; need to supply export data in function arguments
-            #dist_to_src = np.sum([np.linalg.norm(point - src_points[i]) * data.loc[src_countries[i], clusters[dst_cid]].sum() for i in range(len(src_countries))]) / data.loc[src_countries, clusters[dst_cid]].sum().sum() 
-            dist_to_dst = np.linalg.norm(point - dst_mean) # Could do sum of distances to all dst countries instead of only to the mean.
+            # Weighted combination: distance to sources + distance to destination mean
+            dist_to_src = np.sum([np.linalg.norm(point - src_point) for src_point in src_points]) / len(src_points)
+            # Could weight by export: need to supply export data in function arguments
+            #dist_to_src = np.sum([np.linalg.norm(point - src_points[i]) * data.loc[src_countries[i], clusters[dst_cid]].sum() for i in range(len(src_countries))]) / data.loc[src_countries, clusters[dst_cid]].sum().sum()
+            dist_to_dst = np.linalg.norm(point - dst_mean)
             cost = src_dst_weight_ratio * dist_to_src + dist_to_dst
-        
+
         return cost
-    
+
     def project_to_feasible(point):
-        """Project point into feasible region (closest point in any circle)."""
+        """Project point to closest position inside any feasible circle."""
         point = np.array(point)
-        
-        # Check if already in feasible region
+
         for a in areas:
             center = np.array(a['center'])
             r = a['radius']
             if np.linalg.norm(point - center) <= r:
                 return point
-        
-        # Find closest point on boundary of any circle
+
         best_point = None
         best_dist = float('inf')
-        
+
         for a in areas:
             center = np.array(a['center'])
             r = a['radius']
             direction = point - center
             direction_norm = np.linalg.norm(direction)
-            
+
             if direction_norm > 0:
-                # Project onto circle boundary
                 closest = center + (direction / direction_norm) * r
             else:
-                # Point is at center, pick any boundary point
                 closest = center + np.array([r, 0])
-            
+
             dist = np.linalg.norm(point - closest)
             if dist < best_dist:
                 best_dist = dist
                 best_point = closest
-        
+
         return best_point if best_point is not None else point
-    
+
     initial_guess = np.mean(src_points, axis=0)
     result = minimize(cost_function, initial_guess, method='Nelder-Mead')
-    
-    if radius > 0:  # OLD: Project result back into feasible region to ensure it's valid
+
+    if radius > 0:
         final_point = project_to_feasible(result.x)
-    else:           # NEW: Don't project
+    else:
         final_point = result.x
 
     return tuple(final_point)
@@ -434,10 +417,10 @@ def _find_optimal_bundle_point_for_pair(src_cid, dst_cid, centroids, clusters, r
 def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.0, split_radius=1.5, show_intra=True, ax=None):
     """Draw a flow map with edge bundling between clusters.
 
-    Rendering per (src_cluster, dst_cluster):
-      1. Thin edges: each source country  →  bundle point
-      2. One thick edge: bundle point  →  split point   (merged trunk)
-      3. Thin edges: split point  →  each destination country
+    For each (src_cluster, dst_cluster):
+      1. Thin branches from each source country to the bundle point
+      2. Straight trunk from bundle point to split point
+      3. Thin branches from split point to each destination country
     Intra-cluster flows are drawn as direct curved arrows if show_intra=True.
     """
     if ax is None:
@@ -448,64 +431,95 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
 
     gdf.plot(ax=ax, color='lightblue', edgecolor='black', linewidth=0.5)
 
-    # Build centroid lookup
+    # Set axis limits before drawing so transData gives correct pixel coords
+    ax.set_xlim([-15, 45])
+    ax.set_ylim([30, 75])
+
     centroids = {}
     for _, row in gdf.iterrows():
         name = row.get('name')
         centroids[name] = get_centroid(centroid_table, name)
 
-    # Country -> cluster mapping
     country_to_cluster = {}
     for cid, members in clusters.items():
         for c in members:
             country_to_cluster[c] = cid
 
-    # Pre-calculate bundle points for all source-destination pairs
     bundle_points = compute_cluster_bundle_points_per_pair(data, centroids, clusters, radius=bundle_radius)
-    
     bs = compute_bundle_split_points(data, centroids, clusters, bundle_points=bundle_points, bundle_radius=bundle_radius, split_radius=split_radius)
 
-    # Colour palette
     n_clusters = len(clusters)
     cmap = plt.cm.get_cmap('Set1', max(n_clusters, 3))
     cluster_colors = {cid: cmap(i) for i, cid in enumerate(sorted(clusters))}
 
     max_q = data.max(numeric_only=True).max()
 
-    # Compute arc-offset signs for trunks to minimise visual crossings
-    trunk_offsets = _compute_trunk_offsets(bs)
-    
-    max_cluster_export = max(info['total_flow'] for info in bs.values()) if bs else 1
+    # Force a draw so pixel extents are valid for transData
+    ax.get_figure().canvas.draw()
 
-    # ── Draw inter-cluster bundled flows ──
+    def _perp_offset(centre_data, offset_pts, perp_disp):
+        """Shift centre_data by offset_pts (typographic points) along perp_disp
+        (a unit vector in display/pixel space). Returns data coordinates."""
+        dpi = ax.get_figure().dpi
+        px = offset_pts * dpi / 72.0
+        c_disp = ax.transData.transform(centre_data)
+        c_disp = c_disp + perp_disp * px
+        return ax.transData.inverted().transform(c_disp)
+
+    # Draw inter-cluster bundled flows
     for (src_cid, dst_cid), info in bs.items():
-        bundle_pt = info['bundle']
-        split_pt  = info['split']
+        bundle_pt = np.array(info['bundle'], float)
+        split_pt  = np.array(info['split'], float)
         color = cluster_colors.get(dst_cid, 'red')
-        trunk_offset = trunk_offsets[(src_cid, dst_cid)]
 
-        # 1) Thin legs: each source → bundle point  (arrow at bundle end)
-        for country, w in info['src_weights'].items():
-            if country not in centroids:
-                continue
-            lw = 0.3 + (w / max_q) * 3
-            xs, ys = _smooth_curve(centroids[country], bundle_pt)
-            _draw_curve_with_arrow(ax, xs, ys, color, lw, alpha=0.55)
+        trunk_dir = split_pt - bundle_pt
 
-        # 2) Thick trunk: bundle point → split point  (crossing-minimising arc)
-        trunk_lw = 0.5 + (info['total_flow'] / max_q) * 5
-        xs, ys = _smooth_curve(bundle_pt, split_pt, offset=trunk_offset)
-        _draw_curve_with_arrow(ax, xs, ys, color, trunk_lw, alpha=0.75)
+        # Perpendicular in display (pixel) space so it accounts for axis scaling
+        b_disp = ax.transData.transform(bundle_pt)
+        s_disp = ax.transData.transform(split_pt)
+        d_disp = s_disp - b_disp
+        d_len  = np.linalg.norm(d_disp)
+        d_unit = d_disp / (d_len + 1e-12)
+        perp_disp = np.array([-d_unit[1], d_unit[0]])
 
-        # 3) Thin legs: split point → each destination  (arrow at destination)
-        for country, w in info['dst_weights'].items():
-            if country not in centroids:
-                continue
-            lw = 0.3 + (w / max_q) * 3
-            xs, ys = _smooth_curve(split_pt, centroids[country])
-            _draw_curve_with_arrow(ax, xs, ys, color, lw, alpha=0.55)
+        def _branch_lw(w):
+            return 0.3 + (w / max_q) * 3
 
-    # ── Draw intra-cluster flows as direct arcs ──
+        src_branches = [(c, w, _branch_lw(w))
+                        for c, w in info['src_weights'].items()
+                        if c in centroids]
+        dst_branches = [(c, w, _branch_lw(w))
+                        for c, w in info['dst_weights'].items()
+                        if c in centroids]
+
+        trunk_lw = sum(lw for _, _, lw in src_branches) if src_branches else 1.0
+
+        # Source -> bundle: branches arrive side by side at the flat trunk head
+        running_pts = 0.0
+        for country, _, lw in src_branches:
+            centre_pts = running_pts + lw / 2 - trunk_lw / 2
+            running_pts += lw
+            junction = _perp_offset(bundle_pt, centre_pts, perp_disp)
+            xs, ys = _smooth_curve_directed(
+                centroids[country], tuple(junction), tangent_in=trunk_dir)
+            _draw_curve(ax, xs, ys, color, lw, alpha=0.55, arrow=False)
+
+        # Trunk: straight line from bundle to split with flat ends
+        ax.plot([bundle_pt[0], split_pt[0]], [bundle_pt[1], split_pt[1]],
+                color=color, lw=trunk_lw, alpha=0.75,
+                solid_capstyle='butt', zorder=3)
+
+        # Split -> destination: branches depart side by side from the flat trunk head
+        running_pts = 0.0
+        for country, _, lw in dst_branches:
+            centre_pts = running_pts + lw / 2 - trunk_lw / 2
+            running_pts += lw
+            junction = _perp_offset(split_pt, centre_pts, perp_disp)
+            xs, ys = _smooth_curve_directed(
+                tuple(junction), centroids[country], tangent_out=trunk_dir)
+            _draw_curve(ax, xs, ys, color, lw, alpha=0.55, arrow=True)
+
+    # Intra-cluster flows as direct arcs
     if show_intra:
         for src, row_data in data.iterrows():
             src_cid = country_to_cluster.get(src)
@@ -529,11 +543,9 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
                     )
                 )
 
-    # ── Draw country markers ──
-    # Countries that export (source cluster)
-    source_countries = set(data.index)  
-    # All destination countries
-    dest_countries = set(data.columns)  
+    # Country markers
+    source_countries = set(data.index)
+    dest_countries = set(data.columns)
 
     # Source countries: squares, sized by total exports
     for country in source_countries:
@@ -542,59 +554,48 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
         cid = country_to_cluster.get(country)
         if cid is None:
             continue
-
-        # Total exports from this country
         total_export = data.loc[country].sum()
         marker_size = (total_export / max_q) * 5
         color = cluster_colors.get(cid, 'gray')
-
         ax.plot(*centroids[country], marker='s', markersize=marker_size, color=color, markeredgecolor='black', markeredgewidth=1, zorder=6, alpha=0.7)
 
     # Destination countries: circles, unit size
     for country in dest_countries:
         if country not in centroids or country in source_countries:
-            # Skip if not found or already drawn as source
             continue
         cid = country_to_cluster.get(country)
         if cid is None:
             continue
-
         color = cluster_colors.get(cid, 'gray')
         ax.plot(*centroids[country], marker='o', markersize=5,
                 color=color, markeredgecolor='black', markeredgewidth=0.5,
                 zorder=6, alpha=0.7)
 
-    # Debug markers: bundle (●) and split (■) points
+    # Debug markers for bundle and split points
     for (src_cid, dst_cid), info in bs.items():
         ax.plot(*info['bundle'], 'o', color='black', markersize=5, zorder=5)
         ax.plot(*info['split'],  's', color='black', markersize=5, zorder=5)
 
-    # TODO: REMOVE Vis after debugging
-    # ── Draw Feasible Areas as Circles (Debugging) ──
-    # Gather ALL source points globally to ensure exactly 1 circle per source
+    # TODO: REMOVE after debugging
     global_source_pts = [centroids[c] for c in source_countries if c in centroids]
-
     if global_source_pts:
-        # Calculate feasible areas – now returns circles directly
-        areas = _feasible_areas(global_source_pts, radius=3.0) 
-        
+        areas = _feasible_areas(global_source_pts, radius=3.0)
         for area in areas:
             center = area['center']
             circle_radius = area['radius']
-            # Create and add a single green circle patch per source point
             circle = Circle(
                 (center[0], center[1]), circle_radius,
                 facecolor='green', alpha=0.3, edgecolor='green', zorder=2
             )
-            ax.add_patch(circle)
+            #ax.add_patch(circle)
 
     ax.set_xlim([-15, 45])
     ax.set_ylim([30, 75])
     ax.set_xticks([])
     ax.set_yticks([])
-    
+
     if return_fig:
         plt.tight_layout()
         plt.savefig("map.png")
-    
+
     return ax

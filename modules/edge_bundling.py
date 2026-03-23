@@ -138,7 +138,7 @@ def _smooth_curve(p0, p1, offset=0.08, n=40):
 
 
 def _segments_cross(a, b, c, d):
-    """Return True if segment a→b properly (not at endpoints) intersects c→d."""
+    """Return True if segment a->b properly (not at endpoints) intersects c->d."""
     def _cross2d(o, p, q):
         return (p[0] - o[0]) * (q[1] - o[1]) - (p[1] - o[1]) * (q[0] - o[0])
     d1 = _cross2d(c, d, a)
@@ -154,9 +154,7 @@ def _compute_trunk_offsets(bs_points, base_offset=0.15):
 
     This is the crossing-minimization cost function: for each pair of trunk
     segments whose straight-line extents intersect, one gets +base_offset and
-    the other gets -base_offset.  Swap or extend this logic to implement a
-    different crossing-cost criterion (e.g. a continuous penalty minimized via
-    scipy.optimize).
+    the other gets -base_offset. 
     """
     keys = list(bs_points.keys())
     offsets = {k: base_offset for k in keys}
@@ -422,9 +420,9 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, show_intra=True,
     """Draw a flow map with edge bundling between clusters.
 
     Rendering per (src_cluster, dst_cluster):
-      1. Thin edges: each source country  →  bundle point
-      2. One thick edge: bundle point  →  split point   (merged trunk)
-      3. Thin edges: split point  →  each destination country
+      1. Thin edges: each source country  ->  bundle point
+      2. One thick edge: bundle point  ->  split point   (merged trunk)
+      3. Thin edges: split point  ->  each destination country
     Intra-cluster flows are drawn as direct curved arrows if show_intra=True.
     """
     if ax is None:
@@ -602,7 +600,7 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, show_intra=True,
                 (center[0], center[1]), circle_radius,
                 facecolor='green', alpha=0.3, edgecolor='green', zorder=2
             )
-            ax.add_patch(circle)
+            #ax.add_patch(circle)
 
     ax.set_xlim([-15, 45])
     ax.set_ylim([30, 75])
