@@ -2,17 +2,76 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.patches import Circle
+from matplotlib.patches import Circle, Polygon as MplPolygon
+from matplotlib.lines import Line2D
 from scipy.interpolate import CubicSpline
 from scipy.optimize import minimize
 from modules.centroids import get_centroid
 
 
+# Pre-defined colors 
+CLUSTER_COLORS = [
+    '#7F77DD',  # purple
+    '#1D9E75',  # teal
+    '#D85A30',  # coral/orange
+    '#378ADD',  # blue
+    '#D4537E',  # pink
+    '#639922',  # green
+    '#E8A735',  # amber
+    '#8B5CF6',  # violet
+    '#06B6D4',  # cyan
+    '#F97316',  # orange
+    '#14B8A6',  # teal-green
+    '#A855F7',  # bright violet
+    '#EF4444',  # red
+    '#3B82F6',  # sky blue
+    '#84CC16',  # lime
+    '#F59E0B',  # yellow-amber
+    '#EC4899',  # hot pink
+    '#10B981',  # emerald
+    '#6366F1',  # indigo
+    '#F43F5E',  # rose
+]
+
+CLUSTER_EDGE_COLORS = [
+    '#534AB7',
+    '#0F6E56',
+    '#993C1D',
+    '#185FA5',
+    '#993556',
+    '#3B6D11',
+    '#B8841A',
+    '#6D28D9',
+    '#0891B2',
+    '#C2410C',
+    '#0D9488',
+    '#7E22CE',
+    '#B91C1C',
+    '#1D4ED8',
+    '#4D7C0F',
+    '#B45309',
+    '#BE185D',
+    '#047857',
+    '#4338CA',
+    '#BE123C',
+]
+
+# ISO 2-letter country codes for labeling
+COUNTRY_ISO2 = {
+    'Austria': 'AT', 'Belgium': 'BE', 'Bulgaria': 'BG', 'Croatia': 'HR',
+    'Cyprus': 'CY', 'Czechia': 'CZ', 'Denmark': 'DK', 'Estonia': 'EE',
+    'Finland': 'FI', 'France': 'FR', 'Germany': 'DE', 'Greece': 'GR',
+    'Hungary': 'HU', 'Ireland': 'IE', 'Italy': 'IT', 'Latvia': 'LV',
+    'Lithuania': 'LT', 'Luxembourg': 'LU', 'Malta': 'MT', 'Netherlands': 'NL',
+    'Poland': 'PL', 'Portugal': 'PT', 'Romania': 'RO', 'Slovakia': 'SK',
+    'Slovenia': 'SI', 'Spain': 'ES', 'Sweden': 'SE',
+}
+
 
 def compute_cost_weighted_mean(positions, weights):
     """Weighted mean of positions. Minimises sum_i w_i * ||p - x_i||^2.
-    Can be swapped for any function with signature:
-        (positions: dict[str, (x,y)], weights: dict[str, float]) -> (x, y)
+
+    Returns (x, y) tuple.
     """
     total_w = sum(weights.values())
     if total_w == 0:
@@ -224,6 +283,43 @@ def _draw_curve(ax, xs, ys, color, lw, alpha, arrow=True):
         ax.plot(xs, ys, color=color, lw=lw, alpha=alpha,
                 solid_capstyle='round', zorder=3)
 
+def _curve_to_tapered_polygon(xs, ys, width_start, width_end):
+    """Convert a sampled curve into a tapered polygon (wide end to narrow end).
+
+    Parameters
+    ----------
+    xs, ys      : array-like of curve sample coordinates.
+    width_start : polygon width (data coords) at the first sample.
+    width_end   : polygon width (data coords) at the last sample.
+
+    Returns (N, 2) array of polygon corners (left side forward, right side backward).
+    """
+    xs = np.asarray(xs, float)
+    ys = np.asarray(ys, float)
+    n = len(xs)
+    widths = np.linspace(width_start, width_end, n)
+
+    left = np.empty((n, 2))
+    right = np.empty((n, 2))
+
+    for i in range(n):
+        if i == 0:
+            dx, dy = xs[1] - xs[0], ys[1] - ys[0]
+        elif i == n - 1:
+            dx, dy = xs[-1] - xs[-2], ys[-1] - ys[-2]
+        else:
+            dx, dy = xs[i + 1] - xs[i - 1], ys[i + 1] - ys[i - 1]
+
+        length = np.hypot(dx, dy) + 1e-12
+        nx, ny = -dy / length, dx / length
+
+        w = widths[i] / 2
+        left[i] = [xs[i] + nx * w, ys[i] + ny * w]
+        right[i] = [xs[i] - nx * w, ys[i] - ny * w]
+
+    return np.vstack([left, right[::-1]])
+
+
 def _feasible_areas(source_points, radius=3.0):
     """Returns a list of feasible regions as circles (center + radius).
     Currently all circles share the same radius.
@@ -430,23 +526,23 @@ def _find_optimal_bundle_point_for_pair(src_cid, dst_cid, centroids, clusters, r
     return tuple(final_point)
 
 def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.0, split_radius=1.5, show_intra=True, ax=None):
-    """Draw a flow map with edge bundling between clusters.
+    """Draw a flow map with edge bundling between clusters using tapered polygons.
 
     For each (src_cluster, dst_cluster):
-      1. Thin branches from each source country to the bundle point
-      2. Straight trunk from bundle point to split point
-      3. Thin branches from split point to each destination country
-    Intra-cluster flows are drawn as direct curved arrows if show_intra=True.
+      1. Tapered branches from each source country to the bundle point
+      2. Uniform-width trunk from bundle point to split point
+      3. Tapered branches from split point to each destination country
+    Intra-cluster flows are drawn as tapered arcs if show_intra=True.
     """
     if ax is None:
-        fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+        fig, ax = plt.subplots(1, 1, figsize=(40, 33))
         return_fig = True
     else:
         return_fig = False
 
-    gdf.plot(ax=ax, color='lightblue', edgecolor='black', linewidth=0.5)
+    # Base map (zorder 0-1)
+    gdf.plot(ax=ax, color='lightblue', edgecolor='black', linewidth=0.5, zorder=0)
 
-    # Set axis limits before drawing so transData gives correct pixel coords
     ax.set_xlim([-15, 45])
     ax.set_ylim([30, 75])
 
@@ -463,89 +559,95 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
     bundle_points = compute_cluster_bundle_points_per_pair(data, centroids, clusters, radius=bundle_radius)
     bs = compute_bundle_split_points(data, centroids, clusters, bundle_points=bundle_points, bundle_radius=bundle_radius, split_radius=split_radius)
 
-    n_clusters = len(clusters)
-    cmap = plt.cm.get_cmap('Set1', max(n_clusters, 3))
-    cluster_colors = {cid: cmap(i) for i, cid in enumerate(sorted(clusters))}
+    # Custom colour palette
+    cluster_colors = {cid: CLUSTER_COLORS[i % len(CLUSTER_COLORS)]
+                      for i, cid in enumerate(sorted(clusters))}
+    cluster_edge_colors = {cid: CLUSTER_EDGE_COLORS[i % len(CLUSTER_EDGE_COLORS)]
+                           for i, cid in enumerate(sorted(clusters))}
 
-    max_q = data.max(numeric_only=True).max()
+    max_total_flow = max((info['total_flow'] for info in bs.values()), default=1)
 
-    # Force a draw so pixel extents are valid for transData
+    # Force a draw so transData pixel transforms are valid
     ax.get_figure().canvas.draw()
 
-    def _perp_offset(centre_data, offset_pts, perp_disp):
-        """Shift centre_data by offset_pts (typographic points) along perp_disp
-        (a unit vector in display/pixel space). Returns data coordinates."""
-        dpi = ax.get_figure().dpi
-        px = offset_pts * dpi / 72.0
-        c_disp = ax.transData.transform(centre_data)
-        c_disp = c_disp + perp_disp * px
-        return ax.transData.inverted().transform(c_disp)
+    # Display-space helpers (for branch sorting only)
+    def _disp_perp(pt_a, pt_b):
+        a_d = ax.transData.transform(pt_a)
+        b_d = ax.transData.transform(pt_b)
+        d = b_d - a_d
+        d_len = np.linalg.norm(d)
+        d_u = d / (d_len + 1e-12)
+        return np.array([-d_u[1], d_u[0]])
 
-    # Draw inter-cluster bundled flows
+    def _perp_proj(country, perp_disp):
+        pt_d = ax.transData.transform(centroids[country])
+        return np.dot(pt_d, perp_disp)
+
+    # Tapered inter-cluster flows 
     for (src_cid, dst_cid), info in bs.items():
         bundle_pt = np.array(info['bundle'], float)
         split_pt  = np.array(info['split'], float)
         color = cluster_colors.get(dst_cid, 'red')
 
+        total_flow = info['total_flow']
+        t_flow = np.sqrt(total_flow / max_total_flow)
+        trunk_w = 0.15 + t_flow * (1.2 - 0.15)   # data-coord width
+
         trunk_dir = split_pt - bundle_pt
+        trunk_unit = trunk_dir / (np.linalg.norm(trunk_dir) + 1e-12)
+        perp = np.array([-trunk_unit[1], trunk_unit[0]])
 
-        # Perpendicular in display (pixel) space so it accounts for axis scaling
-        b_disp = ax.transData.transform(bundle_pt)
-        s_disp = ax.transData.transform(split_pt)
-        d_disp = s_disp - b_disp
-        d_len  = np.linalg.norm(d_disp)
-        d_unit = d_disp / (d_len + 1e-12)
-        perp_disp = np.array([-d_unit[1], d_unit[0]])
+        perp_disp = _disp_perp(bundle_pt, split_pt)
 
-        def _branch_lw(w):
-            return 0.3 + (w / max_q) * 3
+        # Branch widths proportional to their share of the trunk
+        src_branches = [(c, w, trunk_w * w / total_flow)
+                        for c, w in info['src_weights'].items() if c in centroids]
+        dst_branches = [(c, w, trunk_w * w / total_flow)
+                        for c, w in info['dst_weights'].items() if c in centroids]
 
-        src_branches = [(c, w, _branch_lw(w))
-                        for c, w in info['src_weights'].items()
-                        if c in centroids]
-        dst_branches = [(c, w, _branch_lw(w))
-                        for c, w in info['dst_weights'].items()
-                        if c in centroids]
+        src_branches.sort(key=lambda b: _perp_proj(b[0], perp_disp))
+        dst_branches.sort(key=lambda b: _perp_proj(b[0], perp_disp))
 
-        # Sort branches by their projection onto the perpendicular so that
-        # left-side countries get left slots and right-side countries get
-        # right slots, preventing crossings near the junction.
-        def _perp_proj(country):
-            pt_disp = ax.transData.transform(centroids[country])
-            return np.dot(pt_disp, perp_disp)
+        # Source to bundle: branches arrive side by side at the flat trunk head
+        running = 0.0
+        for country, _, dw in src_branches:
+            offset = running + dw / 2 - trunk_w / 2
+            running += dw
+            junction = bundle_pt + perp * offset
 
-        src_branches.sort(key=lambda b: _perp_proj(b[0]))
-        dst_branches.sort(key=lambda b: _perp_proj(b[0]))
-
-        trunk_lw = sum(lw for _, _, lw in src_branches) if src_branches else 1.0
-
-        # Source -> bundle: branches arrive side by side at the flat trunk head
-        running_pts = 0.0
-        for country, _, lw in src_branches:
-            centre_pts = running_pts + lw / 2 - trunk_lw / 2
-            running_pts += lw
-            junction = _perp_offset(bundle_pt, centre_pts, perp_disp)
             xs, ys = _smooth_curve_directed(
                 centroids[country], tuple(junction), tangent_in=trunk_dir)
-            _draw_curve(ax, xs, ys, color, lw, alpha=0.55, arrow=False)
+            corners = _curve_to_tapered_polygon(xs, ys, dw * 1.5, dw)
+            ax.add_patch(MplPolygon(corners, closed=True, facecolor=color,
+                                    edgecolor='none', alpha=0.45, zorder=2))
 
-        # Trunk: straight line from bundle to split with flat ends
-        ax.plot([bundle_pt[0], split_pt[0]], [bundle_pt[1], split_pt[1]],
-                color=color, lw=trunk_lw, alpha=0.75,
-                solid_capstyle='butt', zorder=3)
+        # Trunk: uniform-width rectangle
+        w_half = trunk_w / 2
+        trunk_corners = np.array([
+            bundle_pt + perp * w_half,
+            bundle_pt - perp * w_half,
+            split_pt  - perp * w_half,
+            split_pt  + perp * w_half,
+        ])
+        ax.add_patch(MplPolygon(trunk_corners, closed=True, facecolor=color,
+                                edgecolor='none', alpha=0.55, zorder=2))
 
-        # Split -> destination: branches depart side by side from the flat trunk head
-        running_pts = 0.0
-        for country, _, lw in dst_branches:
-            centre_pts = running_pts + lw / 2 - trunk_lw / 2
-            running_pts += lw
-            junction = _perp_offset(split_pt, centre_pts, perp_disp)
+        # Split to destination: tapered (wide at split, narrow at destination)
+        running = 0.0
+        for country, _, dw in dst_branches:
+            offset = running + dw / 2 - trunk_w / 2
+            running += dw
+            junction = split_pt + perp * offset
+
             xs, ys = _smooth_curve_directed(
                 tuple(junction), centroids[country], tangent_out=trunk_dir)
-            _draw_curve(ax, xs, ys, color, lw, alpha=0.55, arrow=True)
+            corners = _curve_to_tapered_polygon(xs, ys, dw, dw * 0.15)
+            ax.add_patch(MplPolygon(corners, closed=True, facecolor=color,
+                                    edgecolor='none', alpha=0.45, zorder=2))
 
-    # Intra-cluster flows as direct arcs
+    # Intra-cluster flows as tapered arcs 
     if show_intra:
+        max_q = data.max(numeric_only=True).max()
         for src, row_data in data.iterrows():
             src_cid = country_to_cluster.get(src)
             if src_cid is None or src not in centroids:
@@ -556,63 +658,90 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
                 dst_cid = country_to_cluster.get(dst)
                 if dst_cid is None or src_cid != dst_cid:
                     continue
-                lw = 0.3 + (qty / max_q) * 3
+
+                t_intra = np.sqrt(qty / max_q)
+                w_intra = 0.05 + t_intra * 0.4
                 color = cluster_colors.get(src_cid, 'red')
-                ax.annotate(
-                    "", xy=centroids[dst], xytext=centroids[src],
-                    arrowprops=dict(
-                        arrowstyle="-|>", lw=lw,
-                        color=color, alpha=0.55,
-                        connectionstyle="arc3,rad=0.2",
-                        mutation_scale=6 + lw * 2,
-                    )
-                )
 
-    # Country markers
+                xs, ys = _smooth_curve(centroids[src], centroids[dst], offset=0.15)
+                corners = _curve_to_tapered_polygon(xs, ys, w_intra, w_intra * 0.15)
+                ax.add_patch(MplPolygon(corners, closed=True, facecolor=color,
+                                        edgecolor='none', alpha=0.4, zorder=2))
+
+    # Country markers (zorder 5)
+    # Circles for exporters (scaled by squareroot of export), diamonds for destinations.
     source_countries = set(data.index)
-    dest_countries = set(data.columns)
+    all_countries = source_countries | set(data.columns)
 
-    # Source countries: squares, sized by total exports
-    for country in source_countries:
+    max_export = max((data.loc[c].sum() for c in source_countries
+                      if c in centroids), default=1)
+
+    for country in all_countries:
         if country not in centroids:
             continue
         cid = country_to_cluster.get(country)
         if cid is None:
             continue
-        total_export = data.loc[country].sum()
-        marker_size = (total_export / max_q) * 5
-        color = cluster_colors.get(cid, 'gray')
-        ax.plot(*centroids[country], marker='s', markersize=marker_size, color=color, markeredgecolor='black', markeredgewidth=1, zorder=6, alpha=0.7)
 
-    # Destination countries: circles, unit size
-    for country in dest_countries:
-        if country not in centroids or country in source_countries:
+        fill = cluster_colors.get(cid, 'gray')
+        edge = cluster_edge_colors.get(cid, 'black')
+
+        if country in source_countries:
+            total_export = data.loc[country].sum()
+            size = 2 + 4 * np.sqrt(total_export / max_export)
+            marker = 'o'
+        else:
+            size = 3
+            marker = 'D'
+
+        ax.plot(*centroids[country], marker, color=fill,
+                markeredgecolor=edge, markeredgewidth=1.2,
+                markersize=size, zorder=5, alpha=0.85)
+
+    # Country labels: ISO 2-letter codes 
+    for country in all_countries:
+        if country not in centroids:
             continue
-        cid = country_to_cluster.get(country)
-        if cid is None:
-            continue
-        color = cluster_colors.get(cid, 'gray')
-        ax.plot(*centroids[country], marker='o', markersize=5,
-                color=color, markeredgecolor='black', markeredgewidth=0.5,
-                zorder=6, alpha=0.7)
+        iso2 = COUNTRY_ISO2.get(country, '')
+        if iso2:
+            ax.annotate(iso2, xy=centroids[country], xytext=(5, 5),
+                        textcoords='offset points', fontsize=6,
+                        fontweight='bold', color='#333333', zorder=6)
 
-    # Debug markers for bundle and split points
-    for (src_cid, dst_cid), info in bs.items():
-        ax.plot(*info['bundle'], 'o', color='black', markersize=5, zorder=5)
-        ax.plot(*info['split'],  's', color='black', markersize=5, zorder=5)
+    # Legend
+    # Determine which cluster is the source cluster
+    src_cluster_ids = {country_to_cluster[c] for c in source_countries
+                       if c in country_to_cluster}
 
-    # TODO: REMOVE after debugging
-    global_source_pts = [centroids[c] for c in source_countries if c in centroids]
-    if global_source_pts:
-        areas = _feasible_areas(global_source_pts, radius=3.0)
-        for area in areas:
-            center = area['center']
-            circle_radius = area['radius']
-            circle = Circle(
-                (center[0], center[1]), circle_radius,
-                facecolor='green', alpha=0.3, edgecolor='green', zorder=2
-            )
-            #ax.add_patch(circle)
+    cluster_handles = []
+    for cid in sorted(clusters):
+        members = sorted(clusters[cid])
+        is_src = cid in src_cluster_ids
+        marker = 'o' if is_src else 'D'
+        color = cluster_colors[cid]
+        edge = cluster_edge_colors[cid]
+
+        label = ', '.join(COUNTRY_ISO2.get(c, c[:3]) for c in members[:4])
+        if len(members) > 4:
+            label += f' +{len(members) - 4}'
+        if is_src:
+            label += '  (export)'
+
+        cluster_handles.append(
+            Line2D([0], [0], marker=marker, color='none',
+                   markerfacecolor=color, markeredgecolor=edge,
+                   markeredgewidth=1.2, markersize=8,
+                   alpha=0.85, label=label))
+
+    leg = ax.legend(handles=cluster_handles, loc='upper left',
+                    title='Clusters', fontsize=7,
+                    title_fontsize=8, framealpha=0.9)
+    ax.add_artist(leg)
+
+    ax.annotate('Wide end = source country\nNarrow end = destination',
+                xy=(0.98, 0.02), xycoords='axes fraction', fontsize=6,
+                ha='right',
+                bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
 
     ax.set_xlim([-15, 45])
     ax.set_ylim([30, 75])
@@ -621,6 +750,6 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
 
     if return_fig:
         plt.tight_layout()
-        plt.savefig("map.png")
+        plt.savefig("map.png", dpi=150)
 
     return ax
