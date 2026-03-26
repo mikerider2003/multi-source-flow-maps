@@ -70,7 +70,7 @@ def main_clustered(n_clusters=None, show_intra=None, multiple_bundle_points=True
     cols = min(3, n_keys)
     rows = math.ceil(n_keys / cols)
     
-    fig, axes = plt.subplots(rows, cols, figsize=(6 * cols, 5 * rows))
+    fig, axes = plt.subplots(rows, cols, figsize=(36 * cols, 30 * rows))
     axes = axes.flatten()
 
     for i, m in enumerate(sorted(clusters.keys())):

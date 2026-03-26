@@ -540,7 +540,7 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
     else:
         return_fig = False
 
-    # Base map (zorder 0-1)
+    # Base map (z order 0-1)
     gdf.plot(ax=ax, color='lightblue', edgecolor='black', linewidth=0.5, zorder=0)
 
     ax.set_xlim([-15, 45])
@@ -591,7 +591,7 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
 
         total_flow = info['total_flow']
         t_flow = np.sqrt(total_flow / max_total_flow)
-        trunk_w = 0.15 + t_flow * (1.2 - 0.15)   # data-coord width
+        trunk_w = 0.8 + t_flow * (1.1 - 0.4)   # data-coord width
 
         trunk_dir = split_pt - bundle_pt
         trunk_unit = trunk_dir / (np.linalg.norm(trunk_dir) + 1e-12)
@@ -641,7 +641,8 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
 
             xs, ys = _smooth_curve_directed(
                 tuple(junction), centroids[country], tangent_out=trunk_dir)
-            corners = _curve_to_tapered_polygon(xs, ys, dw, dw * 0.15)
+            narrow = min(max(dw * 0.3, 0.2), dw)
+            corners = _curve_to_tapered_polygon(xs, ys, dw, narrow)
             ax.add_patch(MplPolygon(corners, closed=True, facecolor=color,
                                     edgecolor='none', alpha=0.45, zorder=2))
 
@@ -660,7 +661,7 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
                     continue
 
                 t_intra = np.sqrt(qty / max_q)
-                w_intra = 0.05 + t_intra * 0.4
+                w_intra = 0.5 + t_intra * 0.8
                 color = cluster_colors.get(src_cid, 'red')
 
                 xs, ys = _smooth_curve(centroids[src], centroids[dst], offset=0.15)
@@ -688,10 +689,10 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
 
         if country in source_countries:
             total_export = data.loc[country].sum()
-            size = 2 + 4 * np.sqrt(total_export / max_export)
+            size = 12 + 24 * np.sqrt(total_export / max_export)
             marker = 'o'
         else:
-            size = 3
+            size = 14
             marker = 'D'
 
         ax.plot(*centroids[country], marker, color=fill,
@@ -704,8 +705,8 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
             continue
         iso2 = COUNTRY_ISO2.get(country, '')
         if iso2:
-            ax.annotate(iso2, xy=centroids[country], xytext=(5, 5),
-                        textcoords='offset points', fontsize=6,
+            ax.annotate(iso2, xy=centroids[country], xytext=(6, 6),
+                        textcoords='offset points', fontsize=8,
                         fontweight='bold', color='#333333', zorder=6)
 
     # Legend
@@ -730,12 +731,12 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
         cluster_handles.append(
             Line2D([0], [0], marker=marker, color='none',
                    markerfacecolor=color, markeredgecolor=edge,
-                   markeredgewidth=1.2, markersize=8,
+                   markeredgewidth=2.0, markersize=32,
                    alpha=0.85, label=label))
 
     leg = ax.legend(handles=cluster_handles, loc='upper left',
-                    title='Clusters', fontsize=7,
-                    title_fontsize=8, framealpha=0.9)
+                    title='Clusters', fontsize=28,
+                    title_fontsize=32, framealpha=0.9)
     ax.add_artist(leg)
 
     ax.annotate('Wide end = source country\nNarrow end = destination',

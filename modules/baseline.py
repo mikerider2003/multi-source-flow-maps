@@ -10,7 +10,7 @@ from modules.centroids import get_centroid
 
 def matplotlib_map(gdf, data, centroid_table):
     # Create a figure and axis
-    fig, ax = plt.subplots(1, 1, figsize=(6, 6))
+    fig, ax = plt.subplots(1, 1, figsize=(40, 40))
     
     # Plot the geometries
     gdf.plot(ax=ax, color='lightblue', edgecolor='black', linewidth=0.5)
