@@ -138,6 +138,8 @@ def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_
         bundle_points = compute_cluster_bundle_points_per_pair(data, centroids, clusters, radius=bundle_radius)
 
     result = {}
+    sum_of_min_dist = 0 # Distance between bundle/split point and nearest country, summed over all clusters
+
     for src_cid in clusters:
         for dst_cid in clusters:
             if src_cid == dst_cid:
@@ -170,6 +172,9 @@ def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_
                 bundle_pt, dst_cid, centroids, clusters, radius=split_radius, dst_weights=dst_weights
             )
 
+            sum_of_min_dist += compute_dist_to_closest_country(bundle_pt, src_cid, clusters, centroids)
+            sum_of_min_dist += compute_dist_to_closest_country(split_pt, dst_cid, clusters, centroids)
+
             result[(src_cid, dst_cid)] = {
                 'bundle': bundle_pt,
                 'split': split_pt,
@@ -177,7 +182,23 @@ def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_
                 'dst_weights': dst_weights,
                 'total_flow': sum(src_weights.values()),
             }
+
+    print("BUNDLE/SPLIT DISTANCE SCORE: ", sum_of_min_dist)
+
     return result
+
+def compute_dist_to_closest_country(point, cid, clusters, centroids):
+    """Compute distance between given (bundle/split) point and the closest country in the corresponding cluster (given by cid)"""
+
+    min_dist = np.inf
+    countries = [c for c in clusters[cid] if c in centroids]
+    country_points = np.array([centroids[c] for c in countries])
+
+    for c_point in country_points:
+        min_dist = min(min_dist, np.linalg.norm(point - c_point))
+
+    return min_dist
+
 
 
 def _smooth_curve(p0, p1, offset=0.08, n=40):
