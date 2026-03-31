@@ -584,6 +584,9 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
         return np.dot(pt_d, perp_disp)
 
     # Tapered inter-cluster flows 
+    bundled_length = 0 # Sum of bundled edge lengths (bundle > split)
+    total_length = 0   # Sum of total edge lengths (source > bundle > split > dest)
+
     for (src_cid, dst_cid), info in bs.items():
         bundle_pt = np.array(info['bundle'], float)
         split_pt  = np.array(info['split'], float)
@@ -615,6 +618,8 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
             running += dw
             junction = bundle_pt + perp * offset
 
+            total_length += np.linalg.norm(centroids[country] - junction) # This is just the straight line length instead of following the curve, but it should be a good enough proxy
+
             xs, ys = _smooth_curve_directed(
                 centroids[country], tuple(junction), tangent_in=trunk_dir)
             corners = _curve_to_tapered_polygon(xs, ys, dw * 1.5, dw)
@@ -622,6 +627,9 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
                                     edgecolor='none', alpha=0.45, zorder=2))
 
         # Trunk: uniform-width rectangle
+        bundled_length += np.linalg.norm(bundle_pt - split_pt) * len(src_branches) # Bundled part should be counted once for *each* src > bundle > split > dst flow
+        total_length += np.linalg.norm(bundle_pt - split_pt) * len(src_branches)
+
         w_half = trunk_w / 2
         trunk_corners = np.array([
             bundle_pt + perp * w_half,
@@ -639,12 +647,16 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
             running += dw
             junction = split_pt + perp * offset
 
+            total_length += np.linalg.norm(junction - centroids[country]) # This is just the straight line length instead of following the curve, but it should be a good enough proxy
+
             xs, ys = _smooth_curve_directed(
                 tuple(junction), centroids[country], tangent_out=trunk_dir)
             narrow = min(max(dw * 0.3, 0.2), dw)
             corners = _curve_to_tapered_polygon(xs, ys, dw, narrow)
             ax.add_patch(MplPolygon(corners, closed=True, facecolor=color,
                                     edgecolor='none', alpha=0.45, zorder=2))
+
+    print("BUNDLING SCORE: ", bundled_length / total_length)
 
     # Intra-cluster flows as tapered arcs 
     if show_intra:
