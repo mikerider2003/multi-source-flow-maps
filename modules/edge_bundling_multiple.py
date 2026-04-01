@@ -260,28 +260,115 @@ def _compute_trunk_offsets(bs_points, base_offset=0.15):
     return offsets
 
 
-def _draw_curve(ax, xs, ys, color, lw, alpha, arrow=True):
-    """Draw a sampled curve, optionally with an arrowhead at the end."""
-    if arrow:
-        split = max(2, len(xs) - 5)
-        ax.plot(xs[:split], ys[:split], color=color, lw=lw, alpha=alpha,
-                solid_capstyle='round', zorder=3)
-        ax.annotate(
-            "",
-            xy=(xs[-1], ys[-1]),
-            xytext=(xs[split - 1], ys[split - 1]),
-            arrowprops=dict(
-                arrowstyle="-|>",
-                color=color,
-                lw=lw,
-                alpha=alpha,
-                mutation_scale=6 + lw * 2,
-            ),
-            zorder=4,
-        )
-    else:
-        ax.plot(xs, ys, color=color, lw=lw, alpha=alpha,
-                solid_capstyle='round', zorder=3)
+def _curves_intersect(xs_a, ys_a, xs_b, ys_b):
+    """Vectorised check whether two sampled polylines properly cross."""
+    ax1, ay1 = xs_a[:-1, None], ys_a[:-1, None]
+    ax2, ay2 = xs_a[1:, None],  ys_a[1:, None]
+    bx1, by1 = xs_b[None, :-1], ys_b[None, :-1]
+    bx2, by2 = xs_b[None, 1:],  ys_b[None, 1:]
+
+    def _cross(ox, oy, px, py, qx, qy):
+        return (px - ox) * (qy - oy) - (py - oy) * (qx - ox)
+
+    d1 = _cross(bx1, by1, bx2, by2, ax1, ay1)
+    d2 = _cross(bx1, by1, bx2, by2, ax2, ay2)
+    d3 = _cross(ax1, ay1, ax2, ay2, bx1, by1)
+    d4 = _cross(ax1, ay1, ax2, ay2, bx2, by2)
+    return bool(np.any(((d1 > 0) != (d2 > 0)) & ((d3 > 0) != (d4 > 0))))
+
+
+def _count_fan_crossings(fan_pt, trunk_dir, perp, trunk_w,
+                         ordered_branches, centroids, is_source=False):
+    """Count actual curve–curve crossings for *ordered_branches*.
+
+    Generates Bézier curves at the junction positions implied by the
+    branch order and trunk geometry, then checks every pair for a
+    proper intersection.
+    """
+    fan_pt = np.asarray(fan_pt, float)
+    curves = []
+    running = 0.0
+    for country, _, dw in ordered_branches:
+        offset = running + dw / 2 - trunk_w / 2
+        running += dw
+        junction = tuple(fan_pt + perp * offset)
+        dest = centroids[country]
+        if is_source:
+            xs, ys = _smooth_curve_directed(dest, junction,
+                                            tangent_in=trunk_dir, n=20)
+        else:
+            xs, ys = _smooth_curve_directed(junction, dest,
+                                            tangent_out=trunk_dir, n=20)
+        curves.append((np.asarray(xs), np.asarray(ys)))
+
+    crossings = 0
+    for i in range(len(curves)):
+        for j in range(i + 1, len(curves)):
+            if _curves_intersect(curves[i][0], curves[i][1],
+                                 curves[j][0], curves[j][1]):
+                crossings += 1
+    return crossings
+
+
+def _minimize_fan_crossings(fan_pt, trunk_dir, branches, centroids,
+                            trunk_w, is_source=False):
+    """Return branches reordered to minimise actual curve crossings.
+
+    1. Angular sort as a fast initial guess.
+    2. Generate the real Bézier curves and count crossings.
+    3. If crossings remain and n <= 7, try every permutation.
+    4. For larger n, refine with adjacent-swap passes.
+    """
+    from itertools import permutations as _perms
+
+    n = len(branches)
+    if n <= 1:
+        return branches
+
+    fan_pt = np.asarray(fan_pt, float)
+    trunk_dir = np.asarray(trunk_dir, float)
+    trunk_unit = trunk_dir / (np.linalg.norm(trunk_dir) + 1e-12)
+    perp = np.array([-trunk_unit[1], trunk_unit[0]])
+
+    # initial guess: angular sort around the fan point 
+    def _angle(branch):
+        v = np.array(centroids[branch[0]]) - fan_pt
+        return np.arctan2(np.dot(v, perp), np.dot(v, trunk_unit))
+
+    best = sorted(branches, key=_angle)
+    best_c = _count_fan_crossings(fan_pt, trunk_dir, perp, trunk_w,
+                                  best, centroids, is_source)
+    if best_c == 0:
+        return best
+
+    # exhaustive search for small n 
+    if n <= 7:
+        for perm in _perms(range(n)):
+            candidate = [branches[i] for i in perm]
+            c = _count_fan_crossings(fan_pt, trunk_dir, perp, trunk_w,
+                                     candidate, centroids, is_source)
+            if c < best_c:
+                best, best_c = candidate, c
+                if c == 0:
+                    return best
+        return best
+
+    # adjacent-swap refinement for larger n 
+    improved = True
+    while improved:
+        improved = False
+        for i in range(n - 1):
+            swapped = best[:i] + [best[i + 1], best[i]] + best[i + 2:]
+            c = _count_fan_crossings(fan_pt, trunk_dir, perp, trunk_w,
+                                     swapped, centroids, is_source)
+            if c < best_c:
+                best, best_c = swapped, c
+                improved = True
+                if c == 0:
+                    return best
+
+    return best
+
 
 def _curve_to_tapered_polygon(xs, ys, width_start, width_end):
     """Convert a sampled curve into a tapered polygon (wide end to narrow end).
@@ -567,23 +654,7 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
 
     max_total_flow = max((info['total_flow'] for info in bs.values()), default=1)
 
-    # Force a draw so transData pixel transforms are valid
-    ax.get_figure().canvas.draw()
-
-    # Display-space helpers (for branch sorting only)
-    def _disp_perp(pt_a, pt_b):
-        a_d = ax.transData.transform(pt_a)
-        b_d = ax.transData.transform(pt_b)
-        d = b_d - a_d
-        d_len = np.linalg.norm(d)
-        d_u = d / (d_len + 1e-12)
-        return np.array([-d_u[1], d_u[0]])
-
-    def _perp_proj(country, perp_disp):
-        pt_d = ax.transData.transform(centroids[country])
-        return np.dot(pt_d, perp_disp)
-
-    # Tapered inter-cluster flows 
+    # Tapered inter-cluster flows
     for (src_cid, dst_cid), info in bs.items():
         bundle_pt = np.array(info['bundle'], float)
         split_pt  = np.array(info['split'], float)
@@ -597,16 +668,18 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
         trunk_unit = trunk_dir / (np.linalg.norm(trunk_dir) + 1e-12)
         perp = np.array([-trunk_unit[1], trunk_unit[0]])
 
-        perp_disp = _disp_perp(bundle_pt, split_pt)
-
         # Branch widths proportional to their share of the trunk
         src_branches = [(c, w, trunk_w * w / total_flow)
                         for c, w in info['src_weights'].items() if c in centroids]
         dst_branches = [(c, w, trunk_w * w / total_flow)
                         for c, w in info['dst_weights'].items() if c in centroids]
 
-        src_branches.sort(key=lambda b: _perp_proj(b[0], perp_disp))
-        dst_branches.sort(key=lambda b: _perp_proj(b[0], perp_disp))
+        # Minimise crossings at the bundle and split fan-out points by
+        # testing actual Bézier curves and searching for the best order
+        src_branches = _minimize_fan_crossings(bundle_pt, trunk_dir, src_branches,
+                                               centroids, trunk_w, is_source=True)
+        dst_branches = _minimize_fan_crossings(split_pt, trunk_dir, dst_branches,
+                                               centroids, trunk_w, is_source=False)
 
         # Source to bundle: branches arrive side by side at the flat trunk head
         running = 0.0
