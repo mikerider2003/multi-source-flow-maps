@@ -10,6 +10,15 @@ from modules.edge_bundling import matplotlib_map_bundled as mmb1
 from modules.edge_bundling_multiple import matplotlib_map_bundled as mmb2
 import modules.clustering as clustering
 
+COUNTRY_ISO2 = {
+    'Austria': 'AT', 'Belgium': 'BE', 'Bulgaria': 'BG', 'Croatia': 'HR',
+    'Cyprus': 'CY', 'Czechia': 'CZ', 'Denmark': 'DK', 'Estonia': 'EE',
+    'Finland': 'FI', 'France': 'FR', 'Germany': 'DE', 'Greece': 'GR',
+    'Hungary': 'HU', 'Ireland': 'IE', 'Italy': 'IT', 'Latvia': 'LV',
+    'Lithuania': 'LT', 'Luxembourg': 'LU', 'Malta': 'MT', 'Netherlands': 'NL',
+    'Poland': 'PL', 'Portugal': 'PT', 'Romania': 'RO', 'Slovakia': 'SK',
+    'Slovenia': 'SI', 'Spain': 'ES', 'Sweden': 'SE',
+}
 
 
 def main_clustered(n_clusters=None, show_intra=None, multiple_bundle_points=True, bundle_radius=3.0, split_radius=1.5):
@@ -73,6 +82,10 @@ def main_clustered(n_clusters=None, show_intra=None, multiple_bundle_points=True
     fig, axes = plt.subplots(rows, cols, figsize=(36 * cols, 30 * rows))
     axes = axes.flatten()
 
+    estimated_exports = {} # Estimated export for every pair of countries. For countries A and B belonging respectively to clusters X and Y, the estimated export is
+    # fraction of total export from X that is due to A * fraction of total export from X that goes to B * total export from X to Y, which can equivalently be calculated as
+    # sum([export[A, d] for d in destination_countries]) * sum([export[s, B] for s in source_countries]) / sum([[export[s,d] for s in source_countries] for d in destination_countries])
+
     for i, m in enumerate(sorted(clusters.keys())):
         ax = axes[i]
         source_countries = clusters[m]
@@ -85,7 +98,7 @@ def main_clustered(n_clusters=None, show_intra=None, multiple_bundle_points=True
         ax.set_title(f"Cluster {m}")
 
         if multiple_bundle_points:
-            mmb2(gdf, filtered, centroid_table, clusters, show_intra=show_intra, ax=ax, bundle_radius=bundle_radius, split_radius=split_radius)
+            mmb2(gdf, filtered, centroid_table, clusters, show_intra=show_intra, ax=ax, bundle_radius=bundle_radius, split_radius=split_radius, estimated_exports=estimated_exports)
         else:
             mmb1(gdf, filtered, centroid_table, clusters, show_intra=show_intra, ax=ax, radius=bundle_radius)
             
@@ -93,6 +106,43 @@ def main_clustered(n_clusters=None, show_intra=None, multiple_bundle_points=True
     for j in range(i + 1, len(axes)):
         axes[j].axis('off')
 
+    # Print estimated export table in LaTeX format
+    countries.sort()
+
+    print()
+    print("----- ESTIMATED EXPORTS -----")
+    print()
+    print(f"Min: {min(estimated_exports.values())}")
+    print(f"Max: {max(estimated_exports.values())}")
+    print()
+
+    header_str = "Exporter "
+    for country in countries:
+        header_str += f"& {COUNTRY_ISO2[country]} "
+    header_str += "\\\\"
+    print(header_str)
+    print("\\hline")
+
+    for src_country in countries:
+        line_str = f"{src_country} "
+        for dst_country in countries:
+            try:
+                # Color cell based on value
+                # Simple gradient: < 0.5 is red, 0.5-0.8 is yellow, 0.8-1.2 is green, 1.2-1.5 is yellow again, and >1.5 is red again.
+                value = estimated_exports[src_country, dst_country]
+                if value < 0.5 or value > 1.5:
+                    colorcmd = "\\cellcolor{red}"
+                elif value < 0.8 or value > 1.2:
+                    colorcmd = "\\cellcolor{yellow}"
+                else:
+                    colorcmd = "\\cellcolor{green}"
+                line_str += f"& {colorcmd}{value:.2f} "
+            except KeyError: # If there is no flow between the two countries (e.g. if src = dst), write a "-"
+                line_str += "& - "
+        line_str += "\\\\"
+        print(line_str)
+
+    # Save image
     plt.tight_layout()
     plt.savefig("map.png")
     # plt.show()

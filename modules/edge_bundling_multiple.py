@@ -117,7 +117,7 @@ def compute_cluster_bundle_points_per_pair(data, centroids, clusters, radius=3.0
 
     return bundle_points
 
-def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_points=None, bundle_radius=3.0, split_radius=1.5):
+def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_points=None, bundle_radius=3.0, split_radius=1.5, estimated_exports=None):
     """Compute bundle and split points for every (src_cluster, dst_cluster) pair.
 
     Bundle points are optimized per pair to minimize distance between cluster means.
@@ -130,6 +130,9 @@ def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_
         'dst_weights': {country: flow_total},
         'total_flow': float
     }
+    
+    Also updates estimated exports table with data from the given source cluster. (Note that although the code may suggest that we're going over all countries,
+    in reality "data" only contains export data for *one* source cluster)
     """
     if cost_fn is None:
         cost_fn = compute_cost_weighted_mean
@@ -138,6 +141,8 @@ def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_
         bundle_points = compute_cluster_bundle_points_per_pair(data, centroids, clusters, radius=bundle_radius)
 
     result = {}
+    sum_of_min_dist = 0 # Distance between bundle/split point and nearest country, summed over all clusters
+
     for src_cid in clusters:
         for dst_cid in clusters:
             if src_cid == dst_cid:
@@ -147,11 +152,20 @@ def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_
             if bundle_pt is None:
                 continue
 
+            total_cluster_export = 0 # Total export between these clusters (the sum([[export[s,d] for s in source_countries] for d in destination_countries]) from the pseudocode)
+
             src_weights = {}
             for s in clusters[src_cid]:
                 if s not in data.index or s not in centroids:
                     continue
-                w = sum(data.loc[s, d] for d in clusters[dst_cid] if d in data.columns)
+                w = sum(data.loc[s, d] for d in clusters[dst_cid] if d in data.columns) # This is sum([export[A, d] for d in destination_countries]) from the pseudocode above
+                total_cluster_export += w                                               # Summing this over all A gives us sum([[export[s,d] for s in source_countries] for d in destination_countries])
+
+                for d in clusters[dst_cid]:
+                    if d not in data.columns or d not in centroids:
+                        continue
+                    estimated_exports[(s, d)] = w
+
                 if w > 0:
                     src_weights[s] = w
 
@@ -159,7 +173,15 @@ def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_
             for d in clusters[dst_cid]:
                 if d not in data.columns or d not in centroids:
                     continue
-                w = sum(data.loc[s, d] for s in clusters[src_cid] if s in data.index)
+                w = sum(data.loc[s, d] for s in clusters[src_cid] if s in data.index) # This is sum([export[s, B] for s in source_countries]) from the pseudocode above
+
+                for s in clusters[src_cid]:
+                    if s not in data.index or s not in centroids:
+                        continue
+                    estimated_exports[(s,d)] *= w / total_cluster_export # total_cluster_export has also been fully calculated now
+                    #print(f"Estimated export {s} to {d}: {estimated_exports[(s,d)]}")
+                    estimated_exports[(s,d)] /= data.loc[s,d]  # Divide by actual export to get over/underestimation factor
+
                 if w > 0:
                     dst_weights[d] = w
 
@@ -170,6 +192,9 @@ def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_
                 bundle_pt, dst_cid, centroids, clusters, radius=split_radius, dst_weights=dst_weights
             )
 
+            sum_of_min_dist += compute_dist_to_closest_country(bundle_pt, src_cid, clusters, centroids)
+            sum_of_min_dist += compute_dist_to_closest_country(split_pt, dst_cid, clusters, centroids)
+
             result[(src_cid, dst_cid)] = {
                 'bundle': bundle_pt,
                 'split': split_pt,
@@ -177,7 +202,23 @@ def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_
                 'dst_weights': dst_weights,
                 'total_flow': sum(src_weights.values()),
             }
+
+    print("BUNDLE/SPLIT DISTANCE SCORE: ", sum_of_min_dist)
+
     return result
+
+def compute_dist_to_closest_country(point, cid, clusters, centroids):
+    """Compute distance between given (bundle/split) point and the closest country in the corresponding cluster (given by cid)"""
+
+    min_dist = np.inf
+    countries = [c for c in clusters[cid] if c in centroids]
+    country_points = np.array([centroids[c] for c in countries])
+
+    for c_point in country_points:
+        min_dist = min(min_dist, np.linalg.norm(point - c_point))
+
+    return min_dist
+
 
 
 def _smooth_curve(p0, p1, offset=0.08, n=40):
@@ -612,7 +653,7 @@ def _find_optimal_bundle_point_for_pair(src_cid, dst_cid, centroids, clusters, r
 
     return tuple(final_point)
 
-def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.0, split_radius=1.5, show_intra=True, ax=None):
+def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.0, split_radius=1.5, show_intra=True, ax=None, estimated_exports=None):
     """Draw a flow map with edge bundling between clusters using tapered polygons.
 
     For each (src_cluster, dst_cluster):
@@ -644,7 +685,7 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
             country_to_cluster[c] = cid
 
     bundle_points = compute_cluster_bundle_points_per_pair(data, centroids, clusters, radius=bundle_radius)
-    bs = compute_bundle_split_points(data, centroids, clusters, bundle_points=bundle_points, bundle_radius=bundle_radius, split_radius=split_radius)
+    bs = compute_bundle_split_points(data, centroids, clusters, bundle_points=bundle_points, bundle_radius=bundle_radius, split_radius=split_radius, estimated_exports=estimated_exports)
 
     # Custom colour palette
     cluster_colors = {cid: CLUSTER_COLORS[i % len(CLUSTER_COLORS)]
@@ -654,7 +695,30 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
 
     max_total_flow = max((info['total_flow'] for info in bs.values()), default=1)
 
+<<<<<<< HEAD
     # Tapered inter-cluster flows
+=======
+    # Force a draw so transData pixel transforms are valid
+    ax.get_figure().canvas.draw()
+
+    # Display-space helpers (for branch sorting only)
+    def _disp_perp(pt_a, pt_b):
+        a_d = ax.transData.transform(pt_a)
+        b_d = ax.transData.transform(pt_b)
+        d = b_d - a_d
+        d_len = np.linalg.norm(d)
+        d_u = d / (d_len + 1e-12)
+        return np.array([-d_u[1], d_u[0]])
+
+    def _perp_proj(country, perp_disp):
+        pt_d = ax.transData.transform(centroids[country])
+        return np.dot(pt_d, perp_disp)
+
+    # Tapered inter-cluster flows 
+    bundled_length = 0 # Sum of bundled edge lengths (bundle > split)
+    total_length = 0   # Sum of total edge lengths (source > bundle > split > dest)
+
+>>>>>>> 29a3855e11f01787801ff22d26a2ab559a25f8e5
     for (src_cid, dst_cid), info in bs.items():
         bundle_pt = np.array(info['bundle'], float)
         split_pt  = np.array(info['split'], float)
@@ -688,6 +752,8 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
             running += dw
             junction = bundle_pt + perp * offset
 
+            total_length += np.linalg.norm(centroids[country] - junction) # This is just the straight line length instead of following the curve, but it should be a good enough proxy
+
             xs, ys = _smooth_curve_directed(
                 centroids[country], tuple(junction), tangent_in=trunk_dir)
             corners = _curve_to_tapered_polygon(xs, ys, dw * 1.5, dw)
@@ -695,6 +761,9 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
                                     edgecolor='none', alpha=0.45, zorder=2))
 
         # Trunk: uniform-width rectangle
+        bundled_length += np.linalg.norm(bundle_pt - split_pt) * len(src_branches) # Bundled part should be counted once for *each* src > bundle > split > dst flow
+        total_length += np.linalg.norm(bundle_pt - split_pt) * len(src_branches)
+
         w_half = trunk_w / 2
         trunk_corners = np.array([
             bundle_pt + perp * w_half,
@@ -712,12 +781,16 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
             running += dw
             junction = split_pt + perp * offset
 
+            total_length += np.linalg.norm(junction - centroids[country]) # This is just the straight line length instead of following the curve, but it should be a good enough proxy
+
             xs, ys = _smooth_curve_directed(
                 tuple(junction), centroids[country], tangent_out=trunk_dir)
             narrow = min(max(dw * 0.3, 0.2), dw)
             corners = _curve_to_tapered_polygon(xs, ys, dw, narrow)
             ax.add_patch(MplPolygon(corners, closed=True, facecolor=color,
                                     edgecolor='none', alpha=0.45, zorder=2))
+
+    print("BUNDLING SCORE: ", bundled_length / total_length)
 
     # Intra-cluster flows as tapered arcs 
     if show_intra:
