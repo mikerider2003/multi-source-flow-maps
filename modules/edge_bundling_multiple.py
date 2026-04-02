@@ -695,9 +695,6 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
 
     max_total_flow = max((info['total_flow'] for info in bs.values()), default=1)
 
-<<<<<<< HEAD
-    # Tapered inter-cluster flows
-=======
     # Force a draw so transData pixel transforms are valid
     ax.get_figure().canvas.draw()
 
@@ -718,7 +715,6 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
     bundled_length = 0 # Sum of bundled edge lengths (bundle > split)
     total_length = 0   # Sum of total edge lengths (source > bundle > split > dest)
 
->>>>>>> 29a3855e11f01787801ff22d26a2ab559a25f8e5
     for (src_cid, dst_cid), info in bs.items():
         bundle_pt = np.array(info['bundle'], float)
         split_pt  = np.array(info['split'], float)
