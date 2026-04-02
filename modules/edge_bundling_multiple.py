@@ -117,7 +117,7 @@ def compute_cluster_bundle_points_per_pair(data, centroids, clusters, radius=3.0
 
     return bundle_points
 
-def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_points=None, bundle_radius=3.0, split_radius=1.5, estimated_exports=None):
+def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_points=None, bundle_radius=3.0, split_radius=1.5, estimated_exports=None, distance_scores=None):
     """Compute bundle and split points for every (src_cluster, dst_cluster) pair.
 
     Bundle points are optimized per pair to minimize distance between cluster means.
@@ -204,6 +204,7 @@ def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_
             }
 
     print("BUNDLE/SPLIT DISTANCE SCORE: ", sum_of_min_dist)
+    distance_scores += [sum_of_min_dist] # Add to global distance scores tracker
 
     return result
 
@@ -359,6 +360,8 @@ def _minimize_fan_crossings(fan_pt, trunk_dir, branches, centroids,
     2. Generate the real Bézier curves and count crossings.
     3. If crossings remain and n <= 7, try every permutation.
     4. For larger n, refine with adjacent-swap passes.
+
+    Returns the best sorting of branches as well as the number of crossings achieved by this sorting
     """
     from itertools import permutations as _perms
 
@@ -380,7 +383,7 @@ def _minimize_fan_crossings(fan_pt, trunk_dir, branches, centroids,
     best_c = _count_fan_crossings(fan_pt, trunk_dir, perp, trunk_w,
                                   best, centroids, is_source)
     if best_c == 0:
-        return best
+        return (best, best_c)
 
     # exhaustive search for small n 
     if n <= 7:
@@ -391,8 +394,8 @@ def _minimize_fan_crossings(fan_pt, trunk_dir, branches, centroids,
             if c < best_c:
                 best, best_c = candidate, c
                 if c == 0:
-                    return best
-        return best
+                    return (best, best_c)
+        return (best, best_c)
 
     # adjacent-swap refinement for larger n 
     improved = True
@@ -406,9 +409,9 @@ def _minimize_fan_crossings(fan_pt, trunk_dir, branches, centroids,
                 best, best_c = swapped, c
                 improved = True
                 if c == 0:
-                    return best
+                    return (best, best_c)
 
-    return best
+    return (best, best_c)
 
 
 def _curve_to_tapered_polygon(xs, ys, width_start, width_end):
@@ -653,7 +656,7 @@ def _find_optimal_bundle_point_for_pair(src_cid, dst_cid, centroids, clusters, r
 
     return tuple(final_point)
 
-def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.0, split_radius=1.5, show_intra=True, ax=None, estimated_exports=None):
+def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.0, split_radius=1.5, show_intra=True, ax=None, estimated_exports=None, crossing_scores=None, distance_scores=None, bundling_scores=None):
     """Draw a flow map with edge bundling between clusters using tapered polygons.
 
     For each (src_cluster, dst_cluster):
@@ -685,7 +688,7 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
             country_to_cluster[c] = cid
 
     bundle_points = compute_cluster_bundle_points_per_pair(data, centroids, clusters, radius=bundle_radius)
-    bs = compute_bundle_split_points(data, centroids, clusters, bundle_points=bundle_points, bundle_radius=bundle_radius, split_radius=split_radius, estimated_exports=estimated_exports)
+    bs = compute_bundle_split_points(data, centroids, clusters, bundle_points=bundle_points, bundle_radius=bundle_radius, split_radius=split_radius, estimated_exports=estimated_exports, distance_scores=distance_scores)
 
     # Custom colour palette
     cluster_colors = {cid: CLUSTER_COLORS[i % len(CLUSTER_COLORS)]
@@ -714,6 +717,7 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
     # Tapered inter-cluster flows 
     bundled_length = 0 # Sum of bundled edge lengths (bundle > split)
     total_length = 0   # Sum of total edge lengths (source > bundle > split > dest)
+    nr_crossings = 0   # Total number of crossings
 
     for (src_cid, dst_cid), info in bs.items():
         bundle_pt = np.array(info['bundle'], float)
@@ -736,10 +740,12 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
 
         # Minimise crossings at the bundle and split fan-out points by
         # testing actual Bézier curves and searching for the best order
-        src_branches = _minimize_fan_crossings(bundle_pt, trunk_dir, src_branches,
-                                               centroids, trunk_w, is_source=True)
-        dst_branches = _minimize_fan_crossings(split_pt, trunk_dir, dst_branches,
-                                               centroids, trunk_w, is_source=False)
+        src_branches, c1 = _minimize_fan_crossings(bundle_pt, trunk_dir, src_branches,
+                                                    centroids, trunk_w, is_source=True)
+        dst_branches, c2 = _minimize_fan_crossings(split_pt, trunk_dir, dst_branches,
+                                                    centroids, trunk_w, is_source=False)
+        
+        nr_crossings += c1 + c2
 
         # Source to bundle: branches arrive side by side at the flat trunk head
         running = 0.0
@@ -787,6 +793,10 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
                                     edgecolor='none', alpha=0.45, zorder=2))
 
     print("BUNDLING SCORE: ", bundled_length / total_length)
+    bundling_scores += [bundled_length / total_length] # Also add to global tracker
+
+    print("NR OF CROSSINGS: ", nr_crossings)
+    crossing_scores += [nr_crossings] # Also add to global tracker
 
     # Intra-cluster flows as tapered arcs 
     if show_intra:
