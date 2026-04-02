@@ -117,7 +117,7 @@ def compute_cluster_bundle_points_per_pair(data, centroids, clusters, radius=3.0
 
     return bundle_points
 
-def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_points=None, bundle_radius=3.0, split_radius=1.5):
+def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_points=None, bundle_radius=3.0, split_radius=1.5, estimated_exports=None):
     """Compute bundle and split points for every (src_cluster, dst_cluster) pair.
 
     Bundle points are optimized per pair to minimize distance between cluster means.
@@ -130,6 +130,9 @@ def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_
         'dst_weights': {country: flow_total},
         'total_flow': float
     }
+    
+    Also updates estimated exports table with data from the given source cluster. (Note that although the code may suggest that we're going over all countries,
+    in reality "data" only contains export data for *one* source cluster)
     """
     if cost_fn is None:
         cost_fn = compute_cost_weighted_mean
@@ -149,11 +152,20 @@ def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_
             if bundle_pt is None:
                 continue
 
+            total_cluster_export = 0 # Total export between these clusters (the sum([[export[s,d] for s in source_countries] for d in destination_countries]) from the pseudocode)
+
             src_weights = {}
             for s in clusters[src_cid]:
                 if s not in data.index or s not in centroids:
                     continue
-                w = sum(data.loc[s, d] for d in clusters[dst_cid] if d in data.columns)
+                w = sum(data.loc[s, d] for d in clusters[dst_cid] if d in data.columns) # This is sum([export[A, d] for d in destination_countries]) from the pseudocode above
+                total_cluster_export += w                                               # Summing this over all A gives us sum([[export[s,d] for s in source_countries] for d in destination_countries])
+
+                for d in clusters[dst_cid]:
+                    if d not in data.columns or d not in centroids:
+                        continue
+                    estimated_exports[(s, d)] = w
+
                 if w > 0:
                     src_weights[s] = w
 
@@ -161,7 +173,15 @@ def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_
             for d in clusters[dst_cid]:
                 if d not in data.columns or d not in centroids:
                     continue
-                w = sum(data.loc[s, d] for s in clusters[src_cid] if s in data.index)
+                w = sum(data.loc[s, d] for s in clusters[src_cid] if s in data.index) # This is sum([export[s, B] for s in source_countries]) from the pseudocode above
+
+                for s in clusters[src_cid]:
+                    if s not in data.index or s not in centroids:
+                        continue
+                    estimated_exports[(s,d)] *= w / total_cluster_export # total_cluster_export has also been fully calculated now
+                    #print(f"Estimated export {s} to {d}: {estimated_exports[(s,d)]}")
+                    estimated_exports[(s,d)] /= data.loc[s,d]  # Divide by actual export to get over/underestimation factor
+
                 if w > 0:
                     dst_weights[d] = w
 
@@ -546,7 +566,7 @@ def _find_optimal_bundle_point_for_pair(src_cid, dst_cid, centroids, clusters, r
 
     return tuple(final_point)
 
-def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.0, split_radius=1.5, show_intra=True, ax=None):
+def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.0, split_radius=1.5, show_intra=True, ax=None, estimated_exports=None):
     """Draw a flow map with edge bundling between clusters using tapered polygons.
 
     For each (src_cluster, dst_cluster):
@@ -578,7 +598,7 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
             country_to_cluster[c] = cid
 
     bundle_points = compute_cluster_bundle_points_per_pair(data, centroids, clusters, radius=bundle_radius)
-    bs = compute_bundle_split_points(data, centroids, clusters, bundle_points=bundle_points, bundle_radius=bundle_radius, split_radius=split_radius)
+    bs = compute_bundle_split_points(data, centroids, clusters, bundle_points=bundle_points, bundle_radius=bundle_radius, split_radius=split_radius, estimated_exports=estimated_exports)
 
     # Custom colour palette
     cluster_colors = {cid: CLUSTER_COLORS[i % len(CLUSTER_COLORS)]
