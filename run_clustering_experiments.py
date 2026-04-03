@@ -6,8 +6,11 @@ import re
 from io import StringIO
 from datetime import datetime
 
-# Import your main function
 from main import main_clustered
+
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_DIR = os.path.join(BASE_DIR, "experiments", "clustering")
 
 
 def run_experiment_1(
@@ -17,18 +20,18 @@ def run_experiment_1(
     bundle_radius=0,
     split_radius=0,
     experiment_name=None,
-    output_dir="Experiments",
+    output_dir=OUTPUT_DIR,
 ):
     """
     Wrapper that runs main_clustered, captures output, and returns results
     """
+
     print(f"\n{'='*60}")
     print(f"Running experiment: {experiment_name or f'n_clusters={n_clusters}'}")
     print(f"{'='*60}\n")
 
     os.makedirs(output_dir, exist_ok=True)
 
-    # Capture stdout
     old_stdout = sys.stdout
     sys.stdout = captured_output = StringIO()
 
@@ -47,6 +50,7 @@ def run_experiment_1(
     output = captured_output.getvalue()
     print(output)
 
+
     distance_match = re.search(r'AVG BUNDLE-SPLIT DISTANCE SCORE:\s+([\d.]+)', output)
     bundling_match = re.search(r'AVG EDGE BUNDLING SCORE:\s+([\d.]+)', output)
     crossings_match = re.search(r'AVG NR OF EDGE CROSSINGS:\s+([\d.]+)', output)
@@ -58,6 +62,7 @@ def run_experiment_1(
         metrics['avg_bundling_score'] = float(bundling_match.group(1))
     if crossings_match:
         metrics['avg_crossings'] = float(crossings_match.group(1))
+
 
     cluster_pattern = re.findall(
         r"Source cluster (\d+) countries: (.*?)\n.*?"
@@ -87,6 +92,7 @@ def run_experiment_1(
             "crossings": crossings
         })
 
+
     results = {
         "timestamp": datetime.now().isoformat(),
         "experiment_name": experiment_name or f"n_clusters_{n_clusters}",
@@ -101,13 +107,17 @@ def run_experiment_1(
         "clusters": clusters
     }
 
+
     if experiment_name:
         new_filename = os.path.join(output_dir, f"map_{experiment_name}.png")
     else:
         new_filename = os.path.join(output_dir, f"map_{n_clusters}.png")
 
-    if os.path.exists("map.png"):
-        shutil.move("map.png", new_filename)
+
+    map_path = os.path.join(BASE_DIR, "map.png")
+
+    if os.path.exists(map_path):
+        shutil.move(map_path, new_filename)
         print(f"Saved map to {new_filename}")
 
     print(f"\n{'='*60}\n")
@@ -118,17 +128,17 @@ def run_experiment_1(
 def run_batch_experiment_1():
     """
     Run experiments for different cluster numbers (3, 7, 12)
-    Saves all results to Experiments/experiments.json
+    Saves all results to experiments/clustering/experiments.json
     """
 
-    output_dir = "Experiments"
+    output_dir = OUTPUT_DIR
 
     print("\n" + "="*70)
-    print("BATCH EXPERIMENT 1: Testing cluster numbers 3, 7, and 12")
+    print("BATCH EXPERIMENT 1: Testing cluster numbers 3, 7, 12")
     print("="*70)
     print("\nOutput:")
-    print(f"   - All metrics saved to {output_dir}/experiments.json")
-    print(f"   - Images saved to {output_dir}/map_{{3,7,12}}.png")
+    print(f"   - Metrics → {output_dir}/experiments.json")
+    print(f"   - Images  → {output_dir}/map_{{3,7,12}}.png")
     print("="*70 + "\n")
 
     cluster_values = [3, 7, 12]
@@ -165,14 +175,15 @@ def run_batch_experiment_1():
     for result in all_results:
         n = result['config']['n_clusters']
         metrics = result['metrics']
-        crossings = metrics.get('avg_crossings', 'N/A')
-        bundling = metrics.get('avg_bundling_score', 'N/A')
-        distance = metrics.get('avg_distance_score', 'N/A')
+        crossings = metrics.get('avg_crossings', 0)
+        bundling = metrics.get('avg_bundling_score', 0)
+        distance = metrics.get('avg_distance_score', 0)
+
         print(f"{n:2d} & {crossings:6.2f} & {bundling:6.2f} & {distance:6.2f} \\\\")
 
     print("-" * 70)
-    print(f"\nAll results saved to: {json_path}")
-    print(f"Images saved to: {output_dir}/map_{{3,7,12}}.png")
+    print(f"\nSaved JSON → {json_path}")
+    print(f"Saved maps → {output_dir}/map_{{3,7,12}}.png")
     print("="*70 + "\n")
 
 

@@ -58,5 +58,5 @@ def load_json(path):
 
 
 if __name__ == "__main__":
-    data = load_json("Experiments/experiments.json")
+    data = load_json("./experiments/clustering/experiments.json")
     plot_separate_boxplots(data)
