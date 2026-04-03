@@ -1,0 +1,317 @@
+{
+    "batch_timestamp": "2026-04-03T02:39:30.604866",
+    "description": "Cluster analysis experiment with n_clusters = 3, 7, 12",
+    "experiments": [
+        {
+            "timestamp": "2026-04-03T02:39:06.839197",
+            "experiment_name": "3",
+            "config": {
+                "n_clusters": 3,
+                "show_intra": false,
+                "multiple_bundle_points": true,
+                "bundle_radius": 0,
+                "split_radius": 0
+            },
+            "metrics": {
+                "avg_distance_score": 11.43,
+                "avg_bundling_score": 0.25,
+                "avg_crossings": 2.67
+            },
+            "clusters": [
+                {
+                    "cluster_id": 0,
+                    "countries": [
+                        "Estonia",
+                        "Finland",
+                        "Latvia",
+                        "Lithuania",
+                        "Sweden"
+                    ],
+                    "distance_score": 12.564895420618543,
+                    "bundling_score": 0.15558694990225558,
+                    "crossings": 0.0
+                },
+                {
+                    "cluster_id": 1,
+                    "countries": [
+                        "Belgium",
+                        "Denmark",
+                        "France",
+                        "Germany",
+                        "Ireland",
+                        "Luxembourg",
+                        "Netherlands",
+                        "Portugal",
+                        "Spain"
+                    ],
+                    "distance_score": 14.006120485229115,
+                    "bundling_score": 0.2678822914262677,
+                    "crossings": 2.0
+                },
+                {
+                    "cluster_id": 2,
+                    "countries": [
+                        "Austria",
+                        "Bulgaria",
+                        "Croatia",
+                        "Cyprus",
+                        "Czechia",
+                        "Greece",
+                        "Hungary",
+                        "Italy",
+                        "Malta",
+                        "Poland",
+                        "Romania",
+                        "Slovakia",
+                        "Slovenia"
+                    ],
+                    "distance_score": 7.7065968325334095,
+                    "bundling_score": 0.33862072108760966,
+                    "crossings": 6.0
+                }
+            ]
+        },
+        {
+            "timestamp": "2026-04-03T02:39:14.719064",
+            "experiment_name": "7",
+            "config": {
+                "n_clusters": 7,
+                "show_intra": false,
+                "multiple_bundle_points": true,
+                "bundle_radius": 0,
+                "split_radius": 0
+            },
+            "metrics": {
+                "avg_distance_score": 34.38,
+                "avg_bundling_score": 0.38,
+                "avg_crossings": 0.14
+            },
+            "clusters": [
+                {
+                    "cluster_id": 0,
+                    "countries": [
+                        "France",
+                        "Ireland",
+                        "Portugal",
+                        "Spain"
+                    ],
+                    "distance_score": 30.687599904806795,
+                    "bundling_score": 0.457835868056206,
+                    "crossings": 0.0
+                },
+                {
+                    "cluster_id": 1,
+                    "countries": [
+                        "Bulgaria",
+                        "Cyprus",
+                        "Greece",
+                        "Romania"
+                    ],
+                    "distance_score": 42.508734327837914,
+                    "bundling_score": 0.3697871582308866,
+                    "crossings": 0.0
+                },
+                {
+                    "cluster_id": 2,
+                    "countries": [
+                        "Finland",
+                        "Sweden"
+                    ],
+                    "distance_score": 44.00220150457955,
+                    "bundling_score": 0.3393428187190979,
+                    "crossings": 0.0
+                },
+                {
+                    "cluster_id": 3,
+                    "countries": [
+                        "Italy",
+                        "Malta"
+                    ],
+                    "distance_score": 36.88804724387687,
+                    "bundling_score": 0.29356664476388,
+                    "crossings": 0.0
+                },
+                {
+                    "cluster_id": 4,
+                    "countries": [
+                        "Belgium",
+                        "Denmark",
+                        "Germany",
+                        "Luxembourg",
+                        "Netherlands"
+                    ],
+                    "distance_score": 26.820034502885733,
+                    "bundling_score": 0.42431262255425417,
+                    "crossings": 0.0
+                },
+                {
+                    "cluster_id": 5,
+                    "countries": [
+                        "Estonia",
+                        "Latvia",
+                        "Lithuania",
+                        "Poland"
+                    ],
+                    "distance_score": 30.96214802571262,
+                    "bundling_score": 0.3186735620649981,
+                    "crossings": 1.0
+                },
+                {
+                    "cluster_id": 6,
+                    "countries": [
+                        "Austria",
+                        "Croatia",
+                        "Czechia",
+                        "Hungary",
+                        "Slovakia",
+                        "Slovenia"
+                    ],
+                    "distance_score": 28.766364399240405,
+                    "bundling_score": 0.4332106780417231,
+                    "crossings": 0.0
+                }
+            ]
+        },
+        {
+            "timestamp": "2026-04-03T02:39:30.604668",
+            "experiment_name": "12",
+            "config": {
+                "n_clusters": 12,
+                "show_intra": false,
+                "multiple_bundle_points": true,
+                "bundle_radius": 0,
+                "split_radius": 0
+            },
+            "metrics": {
+                "avg_distance_score": 46.91,
+                "avg_bundling_score": 0.62,
+                "avg_crossings": 0.25
+            },
+            "clusters": [
+                {
+                    "cluster_id": 0,
+                    "countries": [
+                        "Denmark"
+                    ],
+                    "distance_score": 44.5066664028707,
+                    "bundling_score": 0.5180236302365904,
+                    "crossings": 0.0
+                },
+                {
+                    "cluster_id": 1,
+                    "countries": [
+                        "Portugal"
+                    ],
+                    "distance_score": 43.413806857732276,
+                    "bundling_score": 0.6720413477993766,
+                    "crossings": 0.0
+                },
+                {
+                    "cluster_id": 2,
+                    "countries": [
+                        "Hungary",
+                        "Poland",
+                        "Slovakia"
+                    ],
+                    "distance_score": 46.9130742841517,
+                    "bundling_score": 0.6612499609030524,
+                    "crossings": 0.0
+                },
+                {
+                    "cluster_id": 3,
+                    "countries": [
+                        "Spain"
+                    ],
+                    "distance_score": 43.72185206768859,
+                    "bundling_score": 0.6235051618514723,
+                    "crossings": 0.0
+                },
+                {
+                    "cluster_id": 4,
+                    "countries": [
+                        "Germany"
+                    ],
+                    "distance_score": 44.77399530046668,
+                    "bundling_score": 0.5021580340444931,
+                    "crossings": 1.0
+                },
+                {
+                    "cluster_id": 5,
+                    "countries": [
+                        "Belgium",
+                        "France",
+                        "Luxembourg",
+                        "Netherlands"
+                    ],
+                    "distance_score": 47.824250055656556,
+                    "bundling_score": 0.6291148259320205,
+                    "crossings": 0.0
+                },
+                {
+                    "cluster_id": 6,
+                    "countries": [
+                        "Austria",
+                        "Croatia",
+                        "Czechia",
+                        "Italy",
+                        "Slovenia"
+                    ],
+                    "distance_score": 48.231886749709325,
+                    "bundling_score": 0.6200351443781412,
+                    "crossings": 1.0
+                },
+                {
+                    "cluster_id": 7,
+                    "countries": [
+                        "Malta"
+                    ],
+                    "distance_score": 43.07169871125164,
+                    "bundling_score": 0.5839111711525465,
+                    "crossings": 0.0
+                },
+                {
+                    "cluster_id": 8,
+                    "countries": [
+                        "Ireland"
+                    ],
+                    "distance_score": 47.07782725033494,
+                    "bundling_score": 0.6634062827063546,
+                    "crossings": 0.0
+                },
+                {
+                    "cluster_id": 9,
+                    "countries": [
+                        "Estonia",
+                        "Finland",
+                        "Latvia",
+                        "Lithuania"
+                    ],
+                    "distance_score": 49.0841273555966,
+                    "bundling_score": 0.6917959317957519,
+                    "crossings": 0.0
+                },
+                {
+                    "cluster_id": 10,
+                    "countries": [
+                        "Sweden"
+                    ],
+                    "distance_score": 45.277895615182246,
+                    "bundling_score": 0.5712509642134653,
+                    "crossings": 0.0
+                },
+                {
+                    "cluster_id": 11,
+                    "countries": [
+                        "Bulgaria",
+                        "Cyprus",
+                        "Greece",
+                        "Romania"
+                    ],
+                    "distance_score": 59.08166771583201,
+                    "bundling_score": 0.6536951536175412,
+                    "crossings": 1.0
+                }
+            ]
+        }
+    ]
+}

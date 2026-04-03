@@ -367,7 +367,7 @@ def _minimize_fan_crossings(fan_pt, trunk_dir, branches, centroids,
 
     n = len(branches)
     if n <= 1:
-        return branches
+        return (branches, 0)
 
     fan_pt = np.asarray(fan_pt, float)
     trunk_dir = np.asarray(trunk_dir, float)
