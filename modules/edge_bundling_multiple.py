@@ -207,6 +207,9 @@ def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_
 
     print("BUNDLE/SPLIT DISTANCE SCORE (Q3): ", sum_of_min_dist)
 
+    if distance_scores is not None:
+        distance_scores.append(sum_of_min_dist)
+
     # --- Q1 refinement: reduce trunk crossings by perturbing bundle/split points ---
     result = _refine_crossing_reduction(result, centroids, clusters, bundle_radius, split_radius)
 
@@ -300,7 +303,6 @@ def _refine_crossing_reduction(result, centroids, clusters, bundle_radius, split
 
     if best_crossings < initial_crossings:
         print(f"  Q1 refinement: trunk crossings {initial_crossings} -> {best_crossings}")
-    distance_scores += [sum_of_min_dist] # Add to global distance scores tracker
 
     return result
 
@@ -978,12 +980,15 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
     # Q2: Sum of bundling ratios (higher = better bundling)
     bundling_score = sum(bundling_ratios) if bundling_ratios else 0
 
-    print("EDGE CROSSINGS (Q1): ", total_crossings)
-    print("BUNDLING SCORE (Q2): ", bundling_score / len(bundling_ratios) if bundling_ratios else 0)
-    bundling_scores += [bundled_length / total_length] # Also add to global tracker
+    avg_bundling = bundling_score / len(bundling_ratios) if bundling_ratios else 0
 
-    print("NR OF CROSSINGS: ", nr_crossings)
-    crossing_scores += [nr_crossings] # Also add to global tracker
+    print("EDGE CROSSINGS (Q1): ", total_crossings)
+    print("BUNDLING SCORE (Q2): ", avg_bundling)
+
+    if crossing_scores is not None:
+        crossing_scores.append(total_crossings)
+    if bundling_scores is not None:
+        bundling_scores.append(avg_bundling)
 
     # Intra-cluster flows as tapered arcs 
     if show_intra:
