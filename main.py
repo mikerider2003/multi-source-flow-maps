@@ -21,7 +21,7 @@ COUNTRY_ISO2 = {
 }
 
 
-def main_clustered(n_clusters=None, show_intra=None, multiple_bundle_points=True, bundle_radius=3.0, split_radius=1.5, q2_weight=0.3, q3_weight=0.15, output_file="map.png"):
+def main_clustered(n_clusters=None, show_intra=None, multiple_bundle_points=True, bundle_radius=3.0, split_radius=1.5, print_table=False, q2_weight=0.3, q3_weight=0.15, output_file="map.png"):
     """
     Partitions countries into clusters, then generates a flow map with bundled edges between clusters.
 
@@ -82,6 +82,9 @@ def main_clustered(n_clusters=None, show_intra=None, multiple_bundle_points=True
     fig, axes = plt.subplots(rows, cols, figsize=(36 * cols, 30 * rows))
     axes = axes.flatten()
 
+    crossing_scores = []   # Crossing score (i.e. simply the number of edge crossings) for all clusters
+    distance_scores = []   # Bundle/split distance scores for all clusters
+    bundling_scores = []   # Edge bundling scores for all clusters
     estimated_exports = {} # Estimated export for every pair of countries. For countries A and B belonging respectively to clusters X and Y, the estimated export is
     # fraction of total export from X that is due to A * fraction of total export from X that goes to B * total export from X to Y, which can equivalently be calculated as
     # sum([export[A, d] for d in destination_countries]) * sum([export[s, B] for s in source_countries]) / sum([[export[s,d] for s in source_countries] for d in destination_countries])
@@ -98,7 +101,8 @@ def main_clustered(n_clusters=None, show_intra=None, multiple_bundle_points=True
         ax.set_title(f"Cluster {m}")
 
         if multiple_bundle_points:
-            mmb2(gdf, filtered, centroid_table, clusters, show_intra=show_intra, ax=ax, bundle_radius=bundle_radius, split_radius=split_radius, estimated_exports=estimated_exports, q2_weight=q2_weight, q3_weight=q3_weight)
+            mmb2(gdf, filtered, centroid_table, clusters, show_intra=show_intra, ax=ax, bundle_radius=bundle_radius, split_radius=split_radius, 
+                 estimated_exports=estimated_exports, crossing_scores=crossing_scores, distance_scores=distance_scores, bundling_scores=bundling_scores, q2_weight=q2_weight, q3_weight=q3_weight)
         else:
             mmb1(gdf, filtered, centroid_table, clusters, show_intra=show_intra, ax=ax, radius=bundle_radius)
             
@@ -106,41 +110,51 @@ def main_clustered(n_clusters=None, show_intra=None, multiple_bundle_points=True
     for j in range(i + 1, len(axes)):
         axes[j].axis('off')
 
+    # Print average distance & edge bundling scores
+    print()
+    print("----- AVG SCORES -----")
+    print()
+    print(f"AVG BUNDLE-SPLIT DISTANCE SCORE: {np.average(distance_scores):.2f}")
+    print(f"AVG EDGE BUNDLING SCORE: {np.average(bundling_scores):.2f}")
+    print(f"AVG NR OF EDGE CROSSINGS: {np.average(crossing_scores):.2f}")
+
+
     # Print estimated export table in LaTeX format
-    countries.sort()
+    if(print_table):
+        countries.sort()
 
-    print()
-    print("----- ESTIMATED EXPORTS -----")
-    print()
-    print(f"Min: {min(estimated_exports.values())}")
-    print(f"Max: {max(estimated_exports.values())}")
-    print()
+        print()
+        print("----- ESTIMATED EXPORTS -----")
+        print()
+        print(f"Min: {min(estimated_exports.values())}")
+        print(f"Max: {max(estimated_exports.values())}")
+        print()
 
-    header_str = "Exporter "
-    for country in countries:
-        header_str += f"& {COUNTRY_ISO2[country]} "
-    header_str += "\\\\"
-    print(header_str)
-    print("\\hline")
+        header_str = "Exporter "
+        for country in countries:
+            header_str += f"& {COUNTRY_ISO2[country]} "
+        header_str += "\\\\"
+        print(header_str)
+        print("\\hline")
 
-    for src_country in countries:
-        line_str = f"{src_country} "
-        for dst_country in countries:
-            try:
-                # Color cell based on value
-                # Simple gradient: < 0.5 is red, 0.5-0.8 is yellow, 0.8-1.2 is green, 1.2-1.5 is yellow again, and >1.5 is red again.
-                value = estimated_exports[src_country, dst_country]
-                if value < 0.5 or value > 1.5:
-                    colorcmd = "\\cellcolor{red}"
-                elif value < 0.8 or value > 1.2:
-                    colorcmd = "\\cellcolor{yellow}"
-                else:
-                    colorcmd = "\\cellcolor{green}"
-                line_str += f"& {colorcmd}{value:.2f} "
-            except KeyError: # If there is no flow between the two countries (e.g. if src = dst), write a "-"
-                line_str += "& - "
-        line_str += "\\\\"
-        print(line_str)
+        for src_country in countries:
+            line_str = f"{src_country} "
+            for dst_country in countries:
+                try:
+                    # Color cell based on value
+                    # Simple gradient: < 0.5 is red, 0.5-0.8 is yellow, 0.8-1.2 is green, 1.2-1.5 is yellow again, and >1.5 is red again.
+                    value = estimated_exports[src_country, dst_country]
+                    if value < 0.5 or value > 1.5:
+                        colorcmd = "\\cellcolor{red}"
+                    elif value < 0.8 or value > 1.2:
+                        colorcmd = "\\cellcolor{yellow}"
+                    else:
+                        colorcmd = "\\cellcolor{green}"
+                    line_str += f"& {colorcmd}{value:.2f} "
+                except KeyError: # If there is no flow between the two countries (e.g. if src = dst), write a "-"
+                    line_str += "& - "
+            line_str += "\\\\"
+            print(line_str)
 
     # Save image
     plt.tight_layout()
@@ -153,6 +167,6 @@ if __name__ == "__main__":
     mode = "clustered"  # Options: "clustered", "full", "distant", "close", "2_clusters", "3_clusters", "5_clusters"
 
     if mode == "clustered":
-        main_clustered(n_clusters = 7, show_intra=False, multiple_bundle_points=True, bundle_radius=0, split_radius=0)
+        main_clustered(n_clusters = 7, show_intra=False, multiple_bundle_points=True, bundle_radius=0, split_radius=0, print_table=False) # Set print_table to True to print table for experiment 4.3
     else:
         main_baseline(mode)
