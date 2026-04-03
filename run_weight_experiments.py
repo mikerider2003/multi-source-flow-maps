@@ -14,8 +14,11 @@ matplotlib.use('Agg')  # non-interactive backend for batch runs
 
 from main import main_clustered
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_DIR = os.path.join(BASE_DIR, "experiments", "weights")
+
 # Ensure output directory exists
-os.makedirs("experiments", exist_ok=True)
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # Weight configurations to test:
 #   (q2_weight, q3_weight)
@@ -43,7 +46,7 @@ EXPERIMENTS = [
 ]
 
 for q2, q3 in EXPERIMENTS:
-    filename = f"experiments/map_q2={q2:.2f}_q3={q3:.2f}.png"
+    filename = os.path.join(OUTPUT_DIR, f"map_q2={q2:.2f}_q3={q3:.2f}.png")
     print("=" * 70)
     print(f"EXPERIMENT: q2_weight={q2}, q3_weight={q3}")
     print(f"  Output: {filename}")
@@ -66,4 +69,4 @@ for q2, q3 in EXPERIMENTS:
 
     print()
 
-print("All experiments complete. Results saved in experiments/")
+print(f"All experiments complete. Results saved in {OUTPUT_DIR}")
