@@ -21,7 +21,7 @@ COUNTRY_ISO2 = {
 }
 
 
-def main_clustered(n_clusters=None, show_intra=None, multiple_bundle_points=True, bundle_radius=3.0, split_radius=1.5):
+def main_clustered(n_clusters=None, show_intra=None, multiple_bundle_points=True, bundle_radius=3.0, split_radius=1.5, q2_weight=0.3, q3_weight=0.15, output_file="map.png"):
     """
     Partitions countries into clusters, then generates a flow map with bundled edges between clusters.
 
@@ -98,7 +98,7 @@ def main_clustered(n_clusters=None, show_intra=None, multiple_bundle_points=True
         ax.set_title(f"Cluster {m}")
 
         if multiple_bundle_points:
-            mmb2(gdf, filtered, centroid_table, clusters, show_intra=show_intra, ax=ax, bundle_radius=bundle_radius, split_radius=split_radius, estimated_exports=estimated_exports)
+            mmb2(gdf, filtered, centroid_table, clusters, show_intra=show_intra, ax=ax, bundle_radius=bundle_radius, split_radius=split_radius, estimated_exports=estimated_exports, q2_weight=q2_weight, q3_weight=q3_weight)
         else:
             mmb1(gdf, filtered, centroid_table, clusters, show_intra=show_intra, ax=ax, radius=bundle_radius)
             
@@ -144,7 +144,7 @@ def main_clustered(n_clusters=None, show_intra=None, multiple_bundle_points=True
 
     # Save image
     plt.tight_layout()
-    plt.savefig("map.png")
+    plt.savefig(output_file)
     # plt.show()
 
 

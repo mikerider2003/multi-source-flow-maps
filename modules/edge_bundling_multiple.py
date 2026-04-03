@@ -82,7 +82,7 @@ def compute_cost_weighted_mean(positions, weights):
     y = sum(weights[c] * positions[c][1] for c in weights) / total_w
     return (x, y)
 
-def compute_cluster_bundle_points_per_pair(data, centroids, clusters, radius=3.0):
+def compute_cluster_bundle_points_per_pair(data, centroids, clusters, radius=3.0, q2_weight=0.3, q3_weight=0.15):
     """Compute optimal bundle points for each (src_cluster, dst_cluster) pair.
     Each bundle point minimizes distance from source cluster mean to destination cluster mean.
 
@@ -110,14 +110,15 @@ def compute_cluster_bundle_points_per_pair(data, centroids, clusters, radius=3.0
                 continue
 
             opt_pt = _find_optimal_bundle_point_for_pair(
-                src_cid, dst_cid, centroids, clusters, radius, cluster_means
+                src_cid, dst_cid, centroids, clusters, radius, cluster_means,
+                q2_weight=q2_weight, q3_weight=q3_weight
             )
             if opt_pt:
                 bundle_points[(src_cid, dst_cid)] = opt_pt
 
     return bundle_points
 
-def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_points=None, bundle_radius=3.0, split_radius=1.5, estimated_exports=None):
+def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_points=None, bundle_radius=3.0, split_radius=1.5, estimated_exports=None, q2_weight=0.3, q3_weight=0.15):
     """Compute bundle and split points for every (src_cluster, dst_cluster) pair.
 
     Bundle points are optimized per pair to minimize distance between cluster means.
@@ -138,7 +139,7 @@ def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_
         cost_fn = compute_cost_weighted_mean
 
     if bundle_points is None:
-        bundle_points = compute_cluster_bundle_points_per_pair(data, centroids, clusters, radius=bundle_radius)
+        bundle_points = compute_cluster_bundle_points_per_pair(data, centroids, clusters, radius=bundle_radius, q2_weight=q2_weight, q3_weight=q3_weight)
 
     result = {}
     sum_of_min_dist = 0 # Distance between bundle/split point and nearest country, summed over all clusters
@@ -189,7 +190,8 @@ def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_
                 continue
 
             split_pt = _find_optimal_split_point_for_pair(
-                bundle_pt, dst_cid, centroids, clusters, radius=split_radius, dst_weights=dst_weights
+                bundle_pt, dst_cid, centroids, clusters, radius=split_radius, dst_weights=dst_weights,
+                q2_weight=q2_weight, q3_weight=q3_weight
             )
 
             sum_of_min_dist += compute_dist_to_closest_country(bundle_pt, src_cid, clusters, centroids)
@@ -203,7 +205,101 @@ def compute_bundle_split_points(data, centroids, clusters, cost_fn=None, bundle_
                 'total_flow': sum(src_weights.values()),
             }
 
-    print("BUNDLE/SPLIT DISTANCE SCORE: ", sum_of_min_dist)
+    print("BUNDLE/SPLIT DISTANCE SCORE (Q3): ", sum_of_min_dist)
+
+    # --- Q1 refinement: reduce trunk crossings by perturbing bundle/split points ---
+    result = _refine_crossing_reduction(result, centroids, clusters, bundle_radius, split_radius)
+
+    return result
+
+
+def _count_trunk_crossings(bs_points):
+    """Count the total number of trunk-trunk crossings across all cluster pairs."""
+    keys = list(bs_points.keys())
+    crossings = 0
+    for i in range(len(keys)):
+        for j in range(i + 1, len(keys)):
+            ki, kj = keys[i], keys[j]
+            if _segments_cross(
+                bs_points[ki]['bundle'], bs_points[ki]['split'],
+                bs_points[kj]['bundle'], bs_points[kj]['split'],
+            ):
+                crossings += 1
+    return crossings
+
+
+def _refine_crossing_reduction(result, centroids, clusters, bundle_radius, split_radius,
+                                max_iters=20, perturb_scale=0.5):
+    """Post-processing pass that perturbs bundle/split points to reduce trunk crossings.
+
+    For each pair that participates in a crossing, we try small perturbations
+    of its bundle and split points (perpendicular to the trunk direction) and
+    keep the perturbation if it reduces total crossings without violating
+    feasibility constraints.
+    """
+    initial_crossings = _count_trunk_crossings(result)
+    if initial_crossings == 0:
+        return result
+
+    best_crossings = initial_crossings
+
+    for _ in range(max_iters):
+        improved = False
+        keys = list(result.keys())
+
+        for ki in keys:
+            info_i = result[ki]
+            bundle_i = np.array(info_i['bundle'], float)
+            split_i = np.array(info_i['split'], float)
+            trunk_dir = split_i - bundle_i
+            trunk_len = np.linalg.norm(trunk_dir)
+            if trunk_len < 1e-8:
+                continue
+            perp = np.array([-trunk_dir[1], trunk_dir[0]]) / trunk_len
+
+            # Try perturbing bundle and split points perpendicular to trunk
+            for sign in [1.0, -1.0]:
+                for target in ['bundle', 'split']:
+                    orig = np.array(info_i[target], float)
+                    candidate = orig + sign * perturb_scale * perp
+
+                    # Check feasibility: must be within radius of at least one country
+                    src_cid, dst_cid = ki
+                    if target == 'bundle':
+                        cluster_countries = [c for c in clusters[src_cid] if c in centroids]
+                        rad = bundle_radius
+                    else:
+                        cluster_countries = [c for c in clusters[dst_cid] if c in centroids]
+                        rad = split_radius
+
+                    if rad > 0:
+                        in_feasible = any(
+                            np.linalg.norm(candidate - np.array(centroids[c])) <= rad
+                            for c in cluster_countries
+                        )
+                        if not in_feasible:
+                            continue
+
+                    # Test if this reduces crossings
+                    old_val = info_i[target]
+                    info_i[target] = tuple(candidate)
+                    new_crossings = _count_trunk_crossings(result)
+
+                    if new_crossings < best_crossings:
+                        best_crossings = new_crossings
+                        improved = True
+                    else:
+                        info_i[target] = old_val
+
+            if best_crossings == 0:
+                break
+
+        if not improved or best_crossings == 0:
+            break
+        perturb_scale *= 0.8  # Decrease perturbation for finer refinement
+
+    if best_crossings < initial_crossings:
+        print(f"  Q1 refinement: trunk crossings {initial_crossings} -> {best_crossings}")
 
     return result
 
@@ -234,6 +330,14 @@ def _smooth_curve(p0, p1, offset=0.08, n=40):
     cs_x = CubicSpline(t, pts[:, 0], bc_type='clamped')
     cs_y = CubicSpline(t, pts[:, 1], bc_type='clamped')
     return cs_x(t_smooth), cs_y(t_smooth)
+
+
+def _arc_length(xs, ys):
+    """Compute the arc length of a sampled polyline given by xs, ys arrays."""
+    xs, ys = np.asarray(xs), np.asarray(ys)
+    dx = np.diff(xs)
+    dy = np.diff(ys)
+    return float(np.sum(np.hypot(dx, dy)))
 
 
 def _cubic_bezier(p0, p1, p2, p3, n=50):
@@ -456,10 +560,18 @@ def _feasible_areas(source_points, radius=3.0):
     areas = [{'center': src, 'radius': radius} for src in src_arr]
     return areas
 
-def _find_optimal_split_point_for_pair(bundle_pt, dst_cid, centroids, clusters, radius=1.5, dst_weights=None, dst_src_weight_ratio=1.3, min_arc_length=2.0, min_arc_penalty=2.0):
+def _find_optimal_split_point_for_pair(bundle_pt, dst_cid, centroids, clusters, radius=1.5,
+                                       dst_weights=None, dst_src_weight_ratio=1.3,
+                                       min_arc_length=2.0, min_arc_penalty=2.0,
+                                       q2_weight=0.3, q3_weight=0.15):
     """Find the optimal split point for a destination cluster.
-    Minimizes distance from split point to bundle point while staying in feasible areas.
-    Also penalizes positions that would make any destination arc shorter than min_arc_length.
+
+    Multi-objective cost function optimising:
+      - Direction: split point should face the bundle point (minimise dist to bundle)
+      - Q2 (bundling ratio): split point should be close to destination countries so
+        that destination branches are short relative to the trunk.
+      - Q3 (distance to nearest country): split point should not overlap with any
+        destination country centroid, to keep individual flows distinguishable.
 
     Parameters
     ----------
@@ -469,12 +581,11 @@ def _find_optimal_split_point_for_pair(bundle_pt, dst_cid, centroids, clusters, 
     clusters :              cluster_id -> list of country names.
     radius :                radius of feasible areas around destination countries.
     dst_weights :           weights for destination countries (optional, used as fallback).
-    dst_src_weight_ratio :  only used if radius = 0.
-                            How much we value proximity to sink countries vs source countries.
-                            Around 1.2-1.3 works well.
-    min_arc_length :        minimum desired distance (data coords) from the split point to
-                            each destination country. Arcs shorter than this get penalized.
-    min_arc_penalty :       strength of the penalty for short arcs.
+    dst_src_weight_ratio :  weight for proximity to dest vs source (radius=0 mode).
+    min_arc_length :        minimum desired distance from split to each destination country.
+    min_arc_penalty :       strength of the hard-threshold penalty for short arcs.
+    q2_weight :             weight for the bundling-ratio term (penalises long dest branches).
+    q3_weight :             weight for the distance-to-nearest-country term (rewards separation).
 
     Returns (x, y) of the optimal split point.
     """
@@ -493,14 +604,25 @@ def _find_optimal_split_point_for_pair(bundle_pt, dst_cid, centroids, clusters, 
     def cost_function(p):
         point = np.array([p[0], p[1]])
 
+        # --- Primary direction term ---
         if radius > 0:
             cost = np.linalg.norm(point - bundle_pt_arr)
         else:
-            dist_to_dst = np.sum([np.linalg.norm(point - dst_point) for dst_point in dst_points]) / len(dst_points)
+            dist_to_dst = np.mean([np.linalg.norm(point - dp) for dp in dst_points])
             dist_to_src = np.linalg.norm(point - bundle_pt_arr)
             cost = dst_src_weight_ratio * dist_to_dst + dist_to_src
 
-        # Penalize being too close to any destination country
+        # --- Q2: penalise long destination branches (mean dist to dest countries) ---
+        # Shorter branches → larger bundling ratio
+        mean_dst_dist = np.mean([np.linalg.norm(point - dp) for dp in dst_points])
+        cost += q2_weight * mean_dst_dist
+
+        # --- Q3: reward distance to nearest destination country centroid ---
+        # Negative term: larger min-distance → lower cost
+        min_dist = min(np.linalg.norm(point - dp) for dp in dst_points)
+        cost -= q3_weight * min_dist
+
+        # --- Hard threshold: penalise being too close to any destination country ---
         for dst_point in dst_points:
             d = np.linalg.norm(point - dst_point)
             if d < min_arc_length:
@@ -553,27 +675,30 @@ def _find_optimal_split_point_for_pair(bundle_pt, dst_cid, centroids, clusters, 
 
     return tuple(final_point)
 
-def _find_optimal_bundle_point_for_pair(src_cid, dst_cid, centroids, clusters, radius, cluster_means, src_dst_weight_ratio=1.2, min_arc_length=2.0, min_arc_penalty=2.0):
+def _find_optimal_bundle_point_for_pair(src_cid, dst_cid, centroids, clusters, radius, cluster_means,
+                                        src_dst_weight_ratio=1.2, min_arc_length=2.0, min_arc_penalty=2.0,
+                                        q2_weight=0.3, q3_weight=0.15):
     """Find the optimal bundling point for a source cluster targeting a destination cluster.
-    Minimizes distance from source cluster mean to destination cluster mean.
-    Also penalizes positions that would make any source arc shorter than min_arc_length.
+
+    Multi-objective cost function optimising:
+      - Direction: bundle point should face the destination cluster (minimise dist to dst mean)
+      - Q2 (bundling ratio): bundle point should be close to source countries so that
+        source branches are short relative to the trunk.
+      - Q3 (distance to nearest country): bundle point should not overlap with any
+        source country centroid, to keep individual flows distinguishable.
 
     Parameters
     ----------
-    src_cid :               source cluster ID.
-    dst_cid :               destination cluster ID.
+    src_cid, dst_cid :      cluster IDs.
     centroids :             country name -> (x, y).
     clusters :              cluster_id -> list of country names.
     radius :                radius of feasible areas around source points.
-                            If 0, uses a different cost function that also factors in
-                            distance to source countries.
     cluster_means :         precomputed cluster_id -> (x, y).
-    src_dst_weight_ratio :  only used if radius = 0.
-                            How much we value proximity to source countries vs destinations.
-                            Around 1.1-1.2 works well if source distance is unweighted.
-    min_arc_length :        minimum desired distance (data coords) from the bundle point to
-                            each source country. Arcs shorter than this get penalized.
-    min_arc_penalty :       strength of the penalty for short arcs.
+    src_dst_weight_ratio :  weight for proximity to source vs destination (radius=0 mode).
+    min_arc_length :        minimum desired distance from bundle point to each source country.
+    min_arc_penalty :       strength of the hard-threshold penalty for short arcs.
+    q2_weight :             weight for the bundling-ratio term (penalises long source branches).
+    q3_weight :             weight for the distance-to-nearest-country term (rewards separation).
 
     Returns (x, y) or None.
     """
@@ -589,22 +714,32 @@ def _find_optimal_bundle_point_for_pair(src_cid, dst_cid, centroids, clusters, r
         return None
 
     src_points = np.array([centroids[c] for c in src_countries])
+    dst_mean_arr = np.array(dst_mean)
 
     areas = _feasible_areas(src_points, radius=radius)
 
     def cost_function(p):
         point = np.array([p[0], p[1]])
 
+        # --- Primary direction term ---
         if radius > 0:
-            cost = np.linalg.norm(point - dst_mean)
+            cost = np.linalg.norm(point - dst_mean_arr)
         else:
-            dist_to_src = np.sum([np.linalg.norm(point - src_point) for src_point in src_points]) / len(src_points)
-            # Could weight by export: need to supply export data in function arguments
-            #dist_to_src = np.sum([np.linalg.norm(point - src_points[i]) * data.loc[src_countries[i], clusters[dst_cid]].sum() for i in range(len(src_countries))]) / data.loc[src_countries, clusters[dst_cid]].sum().sum()
-            dist_to_dst = np.linalg.norm(point - dst_mean)
+            dist_to_src = np.mean([np.linalg.norm(point - sp) for sp in src_points])
+            dist_to_dst = np.linalg.norm(point - dst_mean_arr)
             cost = src_dst_weight_ratio * dist_to_src + dist_to_dst
 
-        # Penalize being too close to any source country
+        # --- Q2: penalise long source branches (mean dist to source countries) ---
+        # Shorter branches → larger bundling ratio
+        mean_src_dist = np.mean([np.linalg.norm(point - sp) for sp in src_points])
+        cost += q2_weight * mean_src_dist
+
+        # --- Q3: reward distance to nearest source country centroid ---
+        # Negative term: larger min-distance → lower cost
+        min_dist = min(np.linalg.norm(point - sp) for sp in src_points)
+        cost -= q3_weight * min_dist
+
+        # --- Hard threshold: penalise being too close to any source country ---
         for src_point in src_points:
             d = np.linalg.norm(point - src_point)
             if d < min_arc_length:
@@ -653,7 +788,7 @@ def _find_optimal_bundle_point_for_pair(src_cid, dst_cid, centroids, clusters, r
 
     return tuple(final_point)
 
-def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.0, split_radius=1.5, show_intra=True, ax=None, estimated_exports=None):
+def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.0, split_radius=1.5, show_intra=True, ax=None, estimated_exports=None, q2_weight=0.3, q3_weight=0.15):
     """Draw a flow map with edge bundling between clusters using tapered polygons.
 
     For each (src_cluster, dst_cluster):
@@ -684,8 +819,8 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
         for c in members:
             country_to_cluster[c] = cid
 
-    bundle_points = compute_cluster_bundle_points_per_pair(data, centroids, clusters, radius=bundle_radius)
-    bs = compute_bundle_split_points(data, centroids, clusters, bundle_points=bundle_points, bundle_radius=bundle_radius, split_radius=split_radius, estimated_exports=estimated_exports)
+    bundle_points = compute_cluster_bundle_points_per_pair(data, centroids, clusters, radius=bundle_radius, q2_weight=q2_weight, q3_weight=q3_weight)
+    bs = compute_bundle_split_points(data, centroids, clusters, bundle_points=bundle_points, bundle_radius=bundle_radius, split_radius=split_radius, estimated_exports=estimated_exports, q2_weight=q2_weight, q3_weight=q3_weight)
 
     # Custom colour palette
     cluster_colors = {cid: CLUSTER_COLORS[i % len(CLUSTER_COLORS)]
@@ -711,9 +846,15 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
         pt_d = ax.transData.transform(centroids[country])
         return np.dot(pt_d, perp_disp)
 
-    # Tapered inter-cluster flows 
-    bundled_length = 0 # Sum of bundled edge lengths (bundle > split)
-    total_length = 0   # Sum of total edge lengths (source > bundle > split > dest)
+    # Collect all rendered curves for global crossing count (Q1)
+    all_curves = []
+
+    # Per-flow bundling ratio computation (Q2) per report formula:
+    #   r(s,j) = l(bj->pj) / (l(s->bj) + l(bj->pj) + l(pj->d*))
+    #   where d* is the destination with the longest branch
+    bundling_ratios = []
+
+    # Tapered inter-cluster flows
 
     for (src_cid, dst_cid), info in bs.items():
         bundle_pt = np.array(info['bundle'], float)
@@ -721,8 +862,10 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
         color = cluster_colors.get(dst_cid, 'red')
 
         total_flow = info['total_flow']
-        t_flow = np.sqrt(total_flow / max_total_flow)
-        trunk_w = 0.8 + t_flow * (1.1 - 0.4)   # data-coord width
+        # Validity constraint 3: trunk width proportional to F(Ksrc, Kj)
+        # Use sqrt scaling for visual clarity, but ensure proportionality
+        # between different trunks: w ∝ sqrt(F(Ksrc, Kj))
+        trunk_w = 0.4 + 1.1 * np.sqrt(total_flow / max_total_flow)  # data-coord width
 
         trunk_dir = split_pt - bundle_pt
         trunk_unit = trunk_dir / (np.linalg.norm(trunk_dir) + 1e-12)
@@ -741,6 +884,9 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
         dst_branches = _minimize_fan_crossings(split_pt, trunk_dir, dst_branches,
                                                centroids, trunk_w, is_source=False)
 
+        # Track per-source-country branch lengths for Q2 computation
+        src_branch_lengths = {}  # country -> length of source branch (s -> bj)
+
         # Source to bundle: branches arrive side by side at the flat trunk head
         running = 0.0
         for country, _, dw in src_branches:
@@ -748,17 +894,24 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
             running += dw
             junction = bundle_pt + perp * offset
 
-            total_length += np.linalg.norm(centroids[country] - junction) # This is just the straight line length instead of following the curve, but it should be a good enough proxy
-
             xs, ys = _smooth_curve_directed(
                 centroids[country], tuple(junction), tangent_in=trunk_dir)
+            # Store curve for global crossing count (Q1)
+            all_curves.append((np.asarray(xs), np.asarray(ys)))
+            # Compute arc length along the rendered curve
+            src_branch_lengths[country] = _arc_length(xs, ys)
+
             corners = _curve_to_tapered_polygon(xs, ys, dw * 1.5, dw)
             ax.add_patch(MplPolygon(corners, closed=True, facecolor=color,
                                     edgecolor='none', alpha=0.45, zorder=2))
 
-        # Trunk: uniform-width rectangle
-        bundled_length += np.linalg.norm(bundle_pt - split_pt) * len(src_branches) # Bundled part should be counted once for *each* src > bundle > split > dst flow
-        total_length += np.linalg.norm(bundle_pt - split_pt) * len(src_branches)
+        # Trunk: uniform-width rectangle (validity constraint 3: width ∝ F(Ksrc, Kj))
+        trunk_length = np.linalg.norm(bundle_pt - split_pt)
+
+        # Store trunk as a polyline for crossing count
+        trunk_xs = np.array([bundle_pt[0], split_pt[0]])
+        trunk_ys = np.array([bundle_pt[1], split_pt[1]])
+        all_curves.append((trunk_xs, trunk_ys))
 
         w_half = trunk_w / 2
         trunk_corners = np.array([
@@ -771,22 +924,53 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
                                 edgecolor='none', alpha=0.55, zorder=2))
 
         # Split to destination: tapered (wide at split, narrow at destination)
+        dst_branch_lengths = {}  # country -> length of destination branch (pj -> d)
         running = 0.0
         for country, _, dw in dst_branches:
             offset = running + dw / 2 - trunk_w / 2
             running += dw
             junction = split_pt + perp * offset
 
-            total_length += np.linalg.norm(junction - centroids[country]) # This is just the straight line length instead of following the curve, but it should be a good enough proxy
-
             xs, ys = _smooth_curve_directed(
                 tuple(junction), centroids[country], tangent_out=trunk_dir)
+            # Store curve for global crossing count (Q1)
+            all_curves.append((np.asarray(xs), np.asarray(ys)))
+            # Compute arc length along the rendered curve
+            dst_branch_lengths[country] = _arc_length(xs, ys)
+
             narrow = min(max(dw * 0.3, 0.2), dw)
             corners = _curve_to_tapered_polygon(xs, ys, dw, narrow)
             ax.add_patch(MplPolygon(corners, closed=True, facecolor=color,
                                     edgecolor='none', alpha=0.45, zorder=2))
 
-    print("BUNDLING SCORE: ", bundled_length / total_length)
+        # Compute per-flow bundling ratio (Q2) per report formula:
+        #   r(s, j) = l(bj->pj) / l_total(s, j)
+        #   l_total(s, j) = l(s->bj) + l(bj->pj) + l(pj->d*)
+        #   where d* is the destination country with the longest branch
+        if dst_branch_lengths:
+            max_dst_branch = max(dst_branch_lengths.values())
+        else:
+            max_dst_branch = 0
+        for country in src_branch_lengths:
+            l_src = src_branch_lengths[country]
+            l_total = l_src + trunk_length + max_dst_branch
+            if l_total > 0:
+                bundling_ratios.append(trunk_length / l_total)
+
+    # ---- Quality metrics ----
+    # Q1: Total edge crossings across all rendered curves
+    total_crossings = 0
+    for i in range(len(all_curves)):
+        for j in range(i + 1, len(all_curves)):
+            if _curves_intersect(all_curves[i][0], all_curves[i][1],
+                                 all_curves[j][0], all_curves[j][1]):
+                total_crossings += 1
+
+    # Q2: Sum of bundling ratios (higher = better bundling)
+    bundling_score = sum(bundling_ratios) if bundling_ratios else 0
+
+    print("EDGE CROSSINGS (Q1): ", total_crossings)
+    print("BUNDLING SCORE (Q2): ", bundling_score / len(bundling_ratios) if bundling_ratios else 0)
 
     # Intra-cluster flows as tapered arcs 
     if show_intra:
