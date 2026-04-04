@@ -1,9 +1,9 @@
 {
-    "batch_timestamp": "2026-04-03T15:26:20.165090",
+    "batch_timestamp": "2026-04-04T23:28:51.903569",
     "description": "Cluster analysis experiment with n_clusters = 3, 7, 12",
     "experiments": [
         {
-            "timestamp": "2026-04-03T15:25:55.281543",
+            "timestamp": "2026-04-04T23:28:25.240062",
             "experiment_name": "3",
             "config": {
                 "n_clusters": 3,
@@ -13,9 +13,13 @@
                 "split_radius": 0
             },
             "metrics": {
-                "avg_distance_score": 11.43,
-                "avg_bundling_score": 0.25,
-                "avg_crossings": 2.67
+                "avg_distance_score": 10.73,
+                "avg_bundling_score": 0.29,
+                "avg_crossings": 28.0,
+                "avg_edges": 36.67,
+                "normalized_distance_score": 0.2925,
+                "normalized_bundling_score": 0.008,
+                "normalized_crossings": 0.7636
             },
             "clusters": [
                 {
@@ -27,9 +31,13 @@
                         "Lithuania",
                         "Sweden"
                     ],
-                    "distance_score": 12.564895420618543,
-                    "bundling_score": 0.15558694990225558,
-                    "crossings": 0.0
+                    "distance_score": 12.161875383199959,
+                    "bundling_score": 0.24765367097555052,
+                    "crossings": 13.0,
+                    "edges": 33.0,
+                    "normalized_distance_score": 0.36854167827878664,
+                    "normalized_bundling_score": 0.007504656696228804,
+                    "normalized_crossings": 0.3939393939393939
                 },
                 {
                     "cluster_id": 1,
@@ -44,9 +52,13 @@
                         "Portugal",
                         "Spain"
                     ],
-                    "distance_score": 14.006120485229115,
-                    "bundling_score": 0.2678822914262677,
-                    "crossings": 2.0
+                    "distance_score": 11.666149231077842,
+                    "bundling_score": 0.37712460333139597,
+                    "crossings": 24.0,
+                    "edges": 37.0,
+                    "normalized_distance_score": 0.3153013305696714,
+                    "normalized_bundling_score": 0.010192556846794485,
+                    "normalized_crossings": 0.6486486486486487
                 },
                 {
                     "cluster_id": 2,
@@ -65,14 +77,18 @@
                         "Slovakia",
                         "Slovenia"
                     ],
-                    "distance_score": 7.7065968325334095,
-                    "bundling_score": 0.33862072108760966,
-                    "crossings": 6.0
+                    "distance_score": 8.350464943587841,
+                    "bundling_score": 0.2596928794688445,
+                    "crossings": 47.0,
+                    "edges": 40.0,
+                    "normalized_distance_score": 0.20876162358969602,
+                    "normalized_bundling_score": 0.0064923219867211125,
+                    "normalized_crossings": 1.175
                 }
             ]
         },
         {
-            "timestamp": "2026-04-03T15:26:03.637577",
+            "timestamp": "2026-04-04T23:28:34.118902",
             "experiment_name": "7",
             "config": {
                 "n_clusters": 7,
@@ -82,9 +98,13 @@
                 "split_radius": 0
             },
             "metrics": {
-                "avg_distance_score": 34.38,
-                "avg_bundling_score": 0.38,
-                "avg_crossings": 0.14
+                "avg_distance_score": 32.21,
+                "avg_bundling_score": 0.41,
+                "avg_crossings": 58.0,
+                "avg_edges": 50.57,
+                "normalized_distance_score": 0.6368,
+                "normalized_bundling_score": 0.008,
+                "normalized_crossings": 1.1469
             },
             "clusters": [
                 {
@@ -95,9 +115,13 @@
                         "Portugal",
                         "Spain"
                     ],
-                    "distance_score": 30.687599904806795,
-                    "bundling_score": 0.457835868056206,
-                    "crossings": 0.0
+                    "distance_score": 28.5171756598191,
+                    "bundling_score": 0.4574648015514981,
+                    "crossings": 66.0,
+                    "edges": 52.0,
+                    "normalized_distance_score": 0.5484072242272904,
+                    "normalized_bundling_score": 0.008797400029836502,
+                    "normalized_crossings": 1.2692307692307692
                 },
                 {
                     "cluster_id": 1,
@@ -107,19 +131,13 @@
                         "Greece",
                         "Romania"
                     ],
-                    "distance_score": 42.508734327837914,
-                    "bundling_score": 0.3697871582308866,
-                    "crossings": 0.0
-                },
-                {
-                    "cluster_id": 2,
-                    "countries": [
-                        "Finland",
-                        "Sweden"
-                    ],
-                    "distance_score": 44.00220150457955,
-                    "bundling_score": 0.3393428187190979,
-                    "crossings": 0.0
+                    "distance_score": 39.98671838730994,
+                    "bundling_score": 0.41248255504183423,
+                    "crossings": 20.0,
+                    "edges": 42.0,
+                    "normalized_distance_score": 0.9520647235073796,
+                    "normalized_bundling_score": 0.009821013215281768,
+                    "normalized_crossings": 0.47619047619047616
                 },
                 {
                     "cluster_id": 3,
@@ -127,9 +145,13 @@
                         "Italy",
                         "Malta"
                     ],
-                    "distance_score": 36.88804724387687,
-                    "bundling_score": 0.29356664476388,
-                    "crossings": 0.0
+                    "distance_score": 33.143845296992325,
+                    "bundling_score": 0.3699649638652293,
+                    "crossings": 11.0,
+                    "edges": 42.0,
+                    "normalized_distance_score": 0.7891391737379125,
+                    "normalized_bundling_score": 0.008808689615838793,
+                    "normalized_crossings": 0.2619047619047619
                 },
                 {
                     "cluster_id": 4,
@@ -140,9 +162,13 @@
                         "Luxembourg",
                         "Netherlands"
                     ],
-                    "distance_score": 26.820034502885733,
-                    "bundling_score": 0.42431262255425417,
-                    "crossings": 0.0
+                    "distance_score": 26.94976078318982,
+                    "bundling_score": 0.42773050717072564,
+                    "crossings": 98.0,
+                    "edges": 57.0,
+                    "normalized_distance_score": 0.4728028207577161,
+                    "normalized_bundling_score": 0.007504043985451327,
+                    "normalized_crossings": 1.719298245614035
                 },
                 {
                     "cluster_id": 5,
@@ -152,9 +178,13 @@
                         "Lithuania",
                         "Poland"
                     ],
-                    "distance_score": 30.96214802571262,
-                    "bundling_score": 0.3186735620649981,
-                    "crossings": 1.0
+                    "distance_score": 30.611579009427135,
+                    "bundling_score": 0.39026403581907815,
+                    "crossings": 49.0,
+                    "edges": 52.0,
+                    "normalized_distance_score": 0.5886842117197526,
+                    "normalized_bundling_score": 0.007505077611905349,
+                    "normalized_crossings": 0.9423076923076923
                 },
                 {
                     "cluster_id": 6,
@@ -166,14 +196,18 @@
                         "Slovakia",
                         "Slovenia"
                     ],
-                    "distance_score": 28.766364399240405,
-                    "bundling_score": 0.4332106780417231,
-                    "crossings": 0.0
+                    "distance_score": 27.690557976442427,
+                    "bundling_score": 0.36475671856257097,
+                    "crossings": 118.0,
+                    "edges": 62.0,
+                    "normalized_distance_score": 0.44662190284584563,
+                    "normalized_bundling_score": 0.0058831728800414675,
+                    "normalized_crossings": 1.903225806451613
                 }
             ]
         },
         {
-            "timestamp": "2026-04-03T15:26:20.164647",
+            "timestamp": "2026-04-04T23:28:51.903235",
             "experiment_name": "12",
             "config": {
                 "n_clusters": 12,
@@ -183,9 +217,13 @@
                 "split_radius": 0
             },
             "metrics": {
-                "avg_distance_score": 46.91,
-                "avg_bundling_score": 0.62,
-                "avg_crossings": 0.25
+                "avg_distance_score": 44.74,
+                "avg_bundling_score": 0.64,
+                "avg_crossings": 90.92,
+                "avg_edges": 58.67,
+                "normalized_distance_score": 0.7626,
+                "normalized_bundling_score": 0.0109,
+                "normalized_crossings": 1.5497
             },
             "clusters": [
                 {
@@ -193,18 +231,13 @@
                     "countries": [
                         "Denmark"
                     ],
-                    "distance_score": 44.5066664028707,
-                    "bundling_score": 0.5180236302365904,
-                    "crossings": 0.0
-                },
-                {
-                    "cluster_id": 1,
-                    "countries": [
-                        "Portugal"
-                    ],
-                    "distance_score": 43.413806857732276,
-                    "bundling_score": 0.6720413477993766,
-                    "crossings": 0.0
+                    "distance_score": 43.35745458605525,
+                    "bundling_score": 0.7276982792694987,
+                    "crossings": 11.0,
+                    "edges": 47.0,
+                    "normalized_distance_score": 0.9224990337458563,
+                    "normalized_bundling_score": 0.015482942112116994,
+                    "normalized_crossings": 0.23404255319148937
                 },
                 {
                     "cluster_id": 2,
@@ -213,27 +246,39 @@
                         "Poland",
                         "Slovakia"
                     ],
-                    "distance_score": 46.9130742841517,
-                    "bundling_score": 0.6612499609030524,
-                    "crossings": 0.0
+                    "distance_score": 43.54996421877197,
+                    "bundling_score": 0.5663626510043345,
+                    "crossings": 109.0,
+                    "edges": 67.0,
+                    "normalized_distance_score": 0.6499994659518205,
+                    "normalized_bundling_score": 0.008453173895587082,
+                    "normalized_crossings": 1.626865671641791
                 },
                 {
                     "cluster_id": 3,
                     "countries": [
                         "Spain"
                     ],
-                    "distance_score": 43.72185206768859,
-                    "bundling_score": 0.6235051618514723,
-                    "crossings": 0.0
+                    "distance_score": 43.352272179332566,
+                    "bundling_score": 0.6973592998675435,
+                    "crossings": 9.0,
+                    "edges": 47.0,
+                    "normalized_distance_score": 0.9223887697730333,
+                    "normalized_bundling_score": 0.014837431912075394,
+                    "normalized_crossings": 0.19148936170212766
                 },
                 {
                     "cluster_id": 4,
                     "countries": [
                         "Germany"
                     ],
-                    "distance_score": 44.77399530046668,
-                    "bundling_score": 0.5021580340444931,
-                    "crossings": 1.0
+                    "distance_score": 43.52230674171919,
+                    "bundling_score": 0.5827116363890438,
+                    "crossings": 15.0,
+                    "edges": 47.0,
+                    "normalized_distance_score": 0.9260065264195573,
+                    "normalized_bundling_score": 0.012398119923171145,
+                    "normalized_crossings": 0.3191489361702128
                 },
                 {
                     "cluster_id": 5,
@@ -243,73 +288,39 @@
                         "Luxembourg",
                         "Netherlands"
                     ],
-                    "distance_score": 47.824250055656556,
-                    "bundling_score": 0.6291148259320205,
-                    "crossings": 0.0
-                },
-                {
-                    "cluster_id": 6,
-                    "countries": [
-                        "Austria",
-                        "Croatia",
-                        "Czechia",
-                        "Italy",
-                        "Slovenia"
-                    ],
-                    "distance_score": 48.231886749709325,
-                    "bundling_score": 0.6200351443781412,
-                    "crossings": 1.0
+                    "distance_score": 45.09476841213607,
+                    "bundling_score": 0.49519741485895724,
+                    "crossings": 303.0,
+                    "edges": 87.0,
+                    "normalized_distance_score": 0.5183306714038629,
+                    "normalized_bundling_score": 0.005691924308723647,
+                    "normalized_crossings": 3.4827586206896552
                 },
                 {
                     "cluster_id": 7,
                     "countries": [
                         "Malta"
                     ],
-                    "distance_score": 43.07169871125164,
-                    "bundling_score": 0.5839111711525465,
-                    "crossings": 0.0
+                    "distance_score": 42.31228178046655,
+                    "bundling_score": 0.6980722306491176,
+                    "crossings": 12.0,
+                    "edges": 47.0,
+                    "normalized_distance_score": 0.9002613144780117,
+                    "normalized_bundling_score": 0.014852600652108885,
+                    "normalized_crossings": 0.2553191489361702
                 },
                 {
                     "cluster_id": 8,
                     "countries": [
                         "Ireland"
                     ],
-                    "distance_score": 47.07782725033494,
-                    "bundling_score": 0.6634062827063546,
-                    "crossings": 0.0
-                },
-                {
-                    "cluster_id": 9,
-                    "countries": [
-                        "Estonia",
-                        "Finland",
-                        "Latvia",
-                        "Lithuania"
-                    ],
-                    "distance_score": 49.0841273555966,
-                    "bundling_score": 0.6917959317957519,
-                    "crossings": 0.0
-                },
-                {
-                    "cluster_id": 10,
-                    "countries": [
-                        "Sweden"
-                    ],
-                    "distance_score": 45.277895615182246,
-                    "bundling_score": 0.5712509642134653,
-                    "crossings": 0.0
-                },
-                {
-                    "cluster_id": 11,
-                    "countries": [
-                        "Bulgaria",
-                        "Cyprus",
-                        "Greece",
-                        "Romania"
-                    ],
-                    "distance_score": 59.08166771583201,
-                    "bundling_score": 0.6536951536175412,
-                    "crossings": 1.0
+                    "distance_score": 45.86630955798686,
+                    "bundling_score": 0.6366406236736522,
+                    "crossings": 241.0,
+                    "edges": 77.0,
+                    "normalized_distance_score": 0.5956663578959333,
+                    "normalized_bundling_score": 0.008268060047709767,
+                    "normalized_crossings": 3.1298701298701297
                 }
             ]
         }

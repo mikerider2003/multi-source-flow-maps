@@ -2,14 +2,31 @@ import json
 import matplotlib.pyplot as plt
 
 
-def plot_separate_boxplots(data):
+def plot_separate_boxplots(data, use_normalized=False):
+    """
+    Plot boxplots for clustering quality metrics.
+    
+    Parameters
+    ----------
+    data : dict
+        Experiment data loaded from JSON
+    use_normalized : bool
+        If True, plot normalized (per-edge) metrics. If False, plot raw metrics.
+    """
     fig, axes = plt.subplots(1, 3, figsize=(20, 4))
 
-    metrics = [
-        ("distance_score", "Distance"),
-        ("bundling_score", "Bundling"),
-        ("crossings", "Crossings")
-    ]
+    if use_normalized:
+        metrics = [
+            ("normalized_distance_score", "Normalized Distance (per edge)"),
+            ("normalized_bundling_score", "Normalized Bundling (per edge)"),
+            ("normalized_crossings", "Normalized Crossings (per edge)")
+        ]
+    else:
+        metrics = [
+            ("distance_score", "Distance"),
+            ("bundling_score", "Bundling"),
+            ("crossings", "Crossings")
+        ]
 
     for i, (metric, title) in enumerate(metrics):
         values = []
@@ -58,5 +75,17 @@ def load_json(path):
 
 
 if __name__ == "__main__":
+    import sys
+    
     data = load_json("./experiments/clustering/experiments.json")
-    plot_separate_boxplots(data)
+    
+    # Check if --normalized flag is passed
+    use_normalized = "--normalized" in sys.argv or "-n" in sys.argv
+    
+    if use_normalized:
+        print("Plotting NORMALIZED (per-edge) metrics...")
+    else:
+        print("Plotting NON-NORMALIZED metrics...")
+        print("(Use --normalized or -n flag to plot normalized metrics)")
+    
+    plot_separate_boxplots(data, use_normalized=use_normalized)

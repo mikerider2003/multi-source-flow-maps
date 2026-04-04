@@ -54,6 +54,12 @@ def run_experiment_1(
     distance_match = re.search(r'AVG BUNDLE-SPLIT DISTANCE SCORE:\s+([\d.]+)', output)
     bundling_match = re.search(r'AVG EDGE BUNDLING SCORE:\s+([\d.]+)', output)
     crossings_match = re.search(r'AVG NR OF EDGE CROSSINGS:\s+([\d.]+)', output)
+    edges_match = re.search(r'AVG NR OF EDGES:\s+([\d.]+)', output)
+    
+    # Capture normalized metrics
+    norm_distance_match = re.search(r'NORMALIZED BUNDLE-SPLIT DISTANCE SCORE:\s+([\d.]+)', output)
+    norm_bundling_match = re.search(r'NORMALIZED EDGE BUNDLING SCORE:\s+([\d.]+)', output)
+    norm_crossings_match = re.search(r'NORMALIZED NR OF EDGE CROSSINGS:\s+([\d.]+)', output)
 
     metrics = {}
     if distance_match:
@@ -62,13 +68,24 @@ def run_experiment_1(
         metrics['avg_bundling_score'] = float(bundling_match.group(1))
     if crossings_match:
         metrics['avg_crossings'] = float(crossings_match.group(1))
+    if edges_match:
+        metrics['avg_edges'] = float(edges_match.group(1))
+    
+    # Add normalized metrics
+    if norm_distance_match:
+        metrics['normalized_distance_score'] = float(norm_distance_match.group(1))
+    if norm_bundling_match:
+        metrics['normalized_bundling_score'] = float(norm_bundling_match.group(1))
+    if norm_crossings_match:
+        metrics['normalized_crossings'] = float(norm_crossings_match.group(1))
 
 
     cluster_pattern = re.findall(
         r"Source cluster (\d+) countries: (.*?)\n.*?"
-        r"BUNDLE/SPLIT DISTANCE SCORE:\s+([\d.]+)\n"
-        r"BUNDLING SCORE:\s+([\d.]+)\n"
-        r"NR OF CROSSINGS:\s+([\d.]+)",
+        r"BUNDLE/SPLIT DISTANCE SCORE \(Q3\):\s+([\d.]+)\n"
+        r"EDGE CROSSINGS \(Q1\):\s+([\d.]+)\n"
+        r"BUNDLING SCORE \(Q2\):\s+([\d.]+)\n"
+        r"NR OF EDGES:\s+([\d.]+)",
         output,
         re.DOTALL
     )
@@ -79,17 +96,27 @@ def run_experiment_1(
         cluster_id = int(match[0])
         countries_raw = match[1]
         distance = float(match[2])
-        bundling = float(match[3])
-        crossings = float(match[4])
+        crossings = float(match[3])
+        bundling = float(match[4])
+        edges = float(match[5])
 
         countries = [c.strip() for c in countries_raw.split(",")]
+        
+        # Calculate normalized per-edge metrics for this cluster
+        normalized_distance = distance / edges if edges > 0 else 0
+        normalized_bundling = bundling / edges if edges > 0 else 0
+        normalized_crossings = crossings / edges if edges > 0 else 0
 
         clusters.append({
             "cluster_id": cluster_id,
             "countries": countries,
             "distance_score": distance,
             "bundling_score": bundling,
-            "crossings": crossings
+            "crossings": crossings,
+            "edges": edges,
+            "normalized_distance_score": normalized_distance,
+            "normalized_bundling_score": normalized_bundling,
+            "normalized_crossings": normalized_crossings
         })
 
 
@@ -169,7 +196,7 @@ def run_batch_experiment_1():
     print("\n" + "="*70)
     print("ALL EXPERIMENTS COMPLETE!")
     print("="*70)
-    print("\nSummary Table (LaTeX format):")
+    print("\nSummary Table (Non-Normalized - LaTeX format):")
     print("-" * 70)
 
     for result in all_results:
@@ -181,6 +208,19 @@ def run_batch_experiment_1():
 
         print(f"{n:2d} & {crossings:6.2f} & {bundling:6.2f} & {distance:6.2f} \\\\")
 
+    print("-" * 70)
+    print("\nSummary Table (Normalized Per-Edge - LaTeX format):")
+    print("-" * 70)
+
+    for result in all_results:
+        n = result['config']['n_clusters']
+        metrics = result['metrics']
+        norm_crossings = metrics.get('normalized_crossings', 0)
+        norm_bundling = metrics.get('normalized_bundling_score', 0)
+        norm_distance = metrics.get('normalized_distance_score', 0)
+
+        print(f"{n:2d} & {norm_crossings:6.4f} & {norm_bundling:6.4f} & {norm_distance:6.4f} \\\\")
+    
     print("-" * 70)
     print(f"\nSaved JSON → {json_path}")
     print(f"Saved maps → {output_dir}/map_{{3,7,12}}.png")

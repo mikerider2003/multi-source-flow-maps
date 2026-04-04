@@ -85,6 +85,7 @@ def main_clustered(n_clusters=None, show_intra=None, multiple_bundle_points=True
     crossing_scores = []   # Crossing score (i.e. simply the number of edge crossings) for all clusters
     distance_scores = []   # Bundle/split distance scores for all clusters
     bundling_scores = []   # Edge bundling scores for all clusters
+    edge_counts = []       # Number of rendered edges for all clusters
     estimated_exports = {} # Estimated export for every pair of countries. For countries A and B belonging respectively to clusters X and Y, the estimated export is
     # fraction of total export from X that is due to A * fraction of total export from X that goes to B * total export from X to Y, which can equivalently be calculated as
     # sum([export[A, d] for d in destination_countries]) * sum([export[s, B] for s in source_countries]) / sum([[export[s,d] for s in source_countries] for d in destination_countries])
@@ -102,7 +103,7 @@ def main_clustered(n_clusters=None, show_intra=None, multiple_bundle_points=True
 
         if multiple_bundle_points:
             mmb2(gdf, filtered, centroid_table, clusters, show_intra=show_intra, ax=ax, bundle_radius=bundle_radius, split_radius=split_radius, 
-                 estimated_exports=estimated_exports, crossing_scores=crossing_scores, distance_scores=distance_scores, bundling_scores=bundling_scores, q2_weight=q2_weight, q3_weight=q3_weight)
+                 estimated_exports=estimated_exports, crossing_scores=crossing_scores, distance_scores=distance_scores, bundling_scores=bundling_scores, edge_counts=edge_counts, q2_weight=q2_weight, q3_weight=q3_weight)
         else:
             mmb1(gdf, filtered, centroid_table, clusters, show_intra=show_intra, ax=ax, radius=bundle_radius)
             
@@ -117,6 +118,17 @@ def main_clustered(n_clusters=None, show_intra=None, multiple_bundle_points=True
     print(f"AVG BUNDLE-SPLIT DISTANCE SCORE: {np.average(distance_scores):.2f}")
     print(f"AVG EDGE BUNDLING SCORE: {np.average(bundling_scores):.2f}")
     print(f"AVG NR OF EDGE CROSSINGS: {np.average(crossing_scores):.2f}")
+    print(f"AVG NR OF EDGES: {np.average(edge_counts):.2f}")
+    
+    # Print normalized (per-edge) metrics
+    total_edges = sum(edge_counts)
+    if total_edges > 0:
+        print()
+        print("----- NORMALIZED (PER-EDGE) METRICS -----")
+        print()
+        print(f"NORMALIZED BUNDLE-SPLIT DISTANCE SCORE: {sum(distance_scores) / total_edges:.4f}")
+        print(f"NORMALIZED EDGE BUNDLING SCORE: {sum(bundling_scores) / total_edges:.4f}")
+        print(f"NORMALIZED NR OF EDGE CROSSINGS: {sum(crossing_scores) / total_edges:.4f}")
 
 
     # Print estimated export table in LaTeX format

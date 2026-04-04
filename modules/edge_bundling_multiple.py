@@ -793,7 +793,7 @@ def _find_optimal_bundle_point_for_pair(src_cid, dst_cid, centroids, clusters, r
 
     return tuple(final_point)
 
-def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.0, split_radius=1.5, show_intra=True, ax=None, estimated_exports=None, q2_weight=0.3, q3_weight=0.15, crossing_scores=None, distance_scores=None, bundling_scores=None):
+def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.0, split_radius=1.5, show_intra=True, ax=None, estimated_exports=None, q2_weight=0.3, q3_weight=0.15, crossing_scores=None, distance_scores=None, bundling_scores=None, edge_counts=None):
     """Draw a flow map with edge bundling between clusters using tapered polygons.
 
     For each (src_cluster, dst_cluster):
@@ -969,6 +969,9 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
                 bundling_ratios.append(trunk_length / l_total)
 
     # ---- Quality metrics ----
+    # Total number of rendered edges for normalization
+    total_edges = len(all_curves)
+    
     # Q1: Total edge crossings across all rendered curves
     total_crossings = 0
     for i in range(len(all_curves)):
@@ -984,11 +987,14 @@ def matplotlib_map_bundled(gdf, data, centroid_table, clusters, bundle_radius=3.
 
     print("EDGE CROSSINGS (Q1): ", total_crossings)
     print("BUNDLING SCORE (Q2): ", avg_bundling)
+    print("NR OF EDGES: ", total_edges)
 
     if crossing_scores is not None:
         crossing_scores.append(total_crossings)
     if bundling_scores is not None:
         bundling_scores.append(avg_bundling)
+    if edge_counts is not None:
+        edge_counts.append(total_edges)
 
     # Intra-cluster flows as tapered arcs 
     if show_intra:
